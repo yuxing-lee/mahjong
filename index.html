@@ -430,11 +430,18 @@
 
   <!-- 東錢 -->
   <div class="card">
-    <div class="card-title">東錢（每人付給場主）</div>
+    <div class="card-title">東錢（每將・每人付給場主）</div>
     <div class="bottom-btns">
       <button class="bottom-btn" data-value="0"   onclick="selectDong(this)">無</button>
       <button class="bottom-btn" data-value="200"  onclick="selectDong(this)">$200</button>
       <button class="bottom-btn" data-value="400"  onclick="selectDong(this)">$400</button>
+    </div>
+    <div class="count-row" id="dongRoundsRow" style="margin-top:14px; display:none;">
+      <span style="font-size:0.85rem; color:var(--text-dim); flex:1;">將數</span>
+      <button class="count-btn" id="btnRoundsMinus" onclick="adjustRounds(-1)">−</button>
+      <div class="count-display" id="roundsDisplay">1</div>
+      <button class="count-btn" id="btnRoundsPlus"  onclick="adjustRounds(1)">＋</button>
+      <span style="font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--gold); margin-left:12px; min-width:80px; text-align:right;" id="dongTotal"></span>
     </div>
   </div>
 
@@ -486,7 +493,8 @@
 <script>
   // ── State ──
   let bottom = null;
-  let dong = 0;       // 東錢 per player
+  let dong = 0;       // 東錢 per 將 per player
+  let rounds = 1;     // 將數
   let hostIndex = -1; // which player is 場主 (-1 = none)
   let playerCount = 4;
   const MIN_COUNT = 2;
@@ -519,9 +527,31 @@
     btn.closest('.bottom-btns').querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     dong = parseInt(btn.dataset.value, 10);
+    const row = document.getElementById('dongRoundsRow');
+    row.style.display = dong > 0 ? 'flex' : 'none';
+    updateDongTotal();
     updatePnlAll();
     updateZeroSum();
     updateConfirmBtn();
+  }
+
+  // ── 將數 ──
+  function adjustRounds(delta) {
+    const next = rounds + delta;
+    if (next < 1) return;
+    rounds = next;
+    document.getElementById('roundsDisplay').textContent = rounds;
+    document.getElementById('btnRoundsMinus').disabled = rounds <= 1;
+    updateDongTotal();
+    updatePnlAll();
+    updateZeroSum();
+  }
+
+  function updateDongTotal() {
+    const el = document.getElementById('dongTotal');
+    if (!el) return;
+    const total = dong * rounds;
+    el.textContent = total > 0 ? `共 $${total.toLocaleString()}` : '';
   }
 
   // ── Host selector ──
@@ -606,8 +636,9 @@
 
   function calcPnl(i) {
     const chips = parseFloat(playerData[i].chips);
-    const dongAdj = dong === 0 ? 0
-      : (hostIndex === i ? dong * (playerCount - 1) : -dong);
+    const totalDong = dong * rounds;
+    const dongAdj = totalDong === 0 ? 0
+      : (hostIndex === i ? totalDong * (playerCount - 1) : -totalDong);
     return chips - bottom + dongAdj;
   }
 
@@ -729,6 +760,7 @@
       session: session,
       bottom:  bottom,
       dong:    dong,
+      rounds:  rounds,
       date:    now.toISOString(),
       players: players,
     };
@@ -782,7 +814,7 @@
           <span class="record-title">${escHtml(title)}</span>
           <div class="record-meta">
             <span class="record-bottom-tag">底 ${formatMoney(rec.bottom)}</span>
-            ${rec.dong ? `<span class="record-bottom-tag">東 ${formatMoney(rec.dong)}</span>` : ''}
+            ${rec.dong ? `<span class="record-bottom-tag">東 ${formatMoney(rec.dong)}${rec.rounds > 1 ? `×${rec.rounds}將` : ''}</span>` : ''}
             <button class="record-delete" title="刪除" onclick="deleteRecord(event, ${rec.id})">×</button>
           </div>
         </div>
