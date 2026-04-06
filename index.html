@@ -701,9 +701,7 @@
     if (dong === 0) { el.style.display = 'none'; return; }
     const total = dongTotal();
     const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
-    const formula = rounds > 1
-      ? `$${dong.toLocaleString()} × ${rounds}將 × ${playerCount}人`
-      : `$${dong.toLocaleString()} × ${playerCount}人`;
+    const formula = `$${dong.toLocaleString()} × ${rounds}將`;
     el.style.display = 'block';
     el.textContent = `東錢合計：${formula} = $${total.toLocaleString()}（${hostName}收）`;
   }
@@ -795,7 +793,7 @@
   }
 
   function dongTotal() {
-    return dong * rounds * playerCount;
+    return dong * rounds;
   }
 
   function updatePnl(i) {
@@ -878,9 +876,7 @@
     if (dong > 0) {
       const dt = dongTotal();
       const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
-      const formula = rounds > 1
-        ? `$${dong.toLocaleString()} × ${rounds}將 × ${playerCount}人`
-        : `$${dong.toLocaleString()} × ${playerCount}人`;
+      const formula = `$${dong.toLocaleString()} × ${rounds}將`;
       modalDong.textContent = `東錢合計：${formula} = $${dt.toLocaleString()}（${hostName}收）`;
       modalDong.style.display = 'block';
     } else {
