@@ -135,7 +135,7 @@
     /* ── Player rows ── */
     .player-row {
       display: grid;
-      grid-template-columns: 1fr 1fr auto;
+      grid-template-columns: 1fr 1fr auto auto;
       gap: 10px;
       align-items: center;
       padding: 10px 0;
@@ -172,6 +172,33 @@
     .pnl-display.negative { color: var(--red); }
     .pnl-display.zero     { color: var(--muted); }
     .pnl-display.empty    { color: transparent; }
+
+    /* ── Host badge ── */
+    .host-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.75rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .host-btn.active {
+      border-color: var(--gold);
+      color: var(--gold);
+      background: rgba(201,168,76,0.1);
+    }
+    .host-btn:hover:not(.active) {
+      border-color: var(--gold-dim);
+      color: var(--text);
+    }
 
     /* ── Zero-sum check ── */
     .zero-sum-row {
@@ -401,6 +428,16 @@
     </div>
   </div>
 
+  <!-- 東錢 -->
+  <div class="card">
+    <div class="card-title">東錢（每人付給場主）</div>
+    <div class="bottom-btns">
+      <button class="bottom-btn" data-value="0"   onclick="selectDong(this)">無</button>
+      <button class="bottom-btn" data-value="200"  onclick="selectDong(this)">$200</button>
+      <button class="bottom-btn" data-value="400"  onclick="selectDong(this)">$400</button>
+    </div>
+  </div>
+
   <!-- 玩家人數 -->
   <div class="card">
     <div class="card-title">玩家人數</div>
@@ -449,6 +486,8 @@
 <script>
   // ── State ──
   let bottom = null;
+  let dong = 0;       // 東錢 per player
+  let hostIndex = -1; // which player is 場主 (-1 = none)
   let playerCount = 4;
   const MIN_COUNT = 2;
   const MAX_COUNT = 8;
@@ -467,11 +506,39 @@
 
   // ── Bottom selector ──
   function selectBottom(btn) {
-    document.querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
+    // only toggle within the bottom card (first set of bottom-btns)
+    btn.closest('.bottom-btns').querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     bottom = parseInt(btn.dataset.value, 10);
     updatePnlAll();
     updateConfirmBtn();
+  }
+
+  // ── 東錢 selector ──
+  function selectDong(btn) {
+    btn.closest('.bottom-btns').querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    dong = parseInt(btn.dataset.value, 10);
+    updatePnlAll();
+    updateZeroSum();
+    updateConfirmBtn();
+  }
+
+  // ── Host selector ──
+  function selectHost(i) {
+    if (hostIndex === i) {
+      // deselect
+      hostIndex = -1;
+    } else {
+      hostIndex = i;
+    }
+    // update all host buttons
+    for (let j = 0; j < playerCount; j++) {
+      const btn = document.getElementById(`host-${j}`);
+      if (btn) btn.className = 'host-btn' + (hostIndex === j ? ' active' : '');
+    }
+    updatePnlAll();
+    updateZeroSum();
   }
 
   // ── Player count ──
@@ -516,6 +583,8 @@
                value="${escHtml(playerData[i].chips)}"
                oninput="onChipsInput(${i}, this.value)" />
         <div class="pnl-display empty" id="pnl-${i}">—</div>
+        <button class="host-btn${hostIndex === i ? ' active' : ''}" id="host-${i}"
+                onclick="selectHost(${i})" title="設為場主">莊</button>
       `;
       container.appendChild(row);
     }
@@ -535,6 +604,13 @@
     updateConfirmBtn();
   }
 
+  function calcPnl(i) {
+    const chips = parseFloat(playerData[i].chips);
+    const dongAdj = dong === 0 ? 0
+      : (hostIndex === i ? dong * (playerCount - 1) : -dong);
+    return chips - bottom + dongAdj;
+  }
+
   function updatePnl(i) {
     const el = document.getElementById(`pnl-${i}`);
     if (!el) return;
@@ -544,7 +620,7 @@
       el.className = 'pnl-display empty';
       return;
     }
-    const pnl = parseFloat(chips) - bottom;
+    const pnl = calcPnl(i);
     el.textContent = formatPnl(pnl);
     el.className = 'pnl-display ' + pnlClass(pnl);
   }
@@ -598,11 +674,12 @@
     for (let i = 0; i < playerCount; i++) {
       const name  = playerData[i].name || `玩家 ${i + 1}`;
       const chips = parseFloat(playerData[i].chips);
-      const pnl   = chips - bottom;
+      const pnl   = calcPnl(i);
       const row = document.createElement('div');
       row.className = 'modal-player-row';
+      const isHost = hostIndex === i && dong > 0;
       row.innerHTML = `
-        <span class="modal-player-name">${escHtml(name)}</span>
+        <span class="modal-player-name">${escHtml(name)}${isHost ? ' <small style="color:var(--gold);font-size:0.7em">場主</small>' : ''}</span>
         <span class="modal-player-chips">${chips.toLocaleString()}</span>
         <span class="modal-player-pnl ${pnlClass(pnl)}">${formatPnl(pnl)}</span>
       `;
@@ -640,9 +717,10 @@
     for (let i = 0; i < playerCount; i++) {
       const chips = parseFloat(playerData[i].chips);
       players.push({
-        name:  playerData[i].name || `玩家 ${i + 1}`,
-        chips: chips,
-        pnl:   chips - bottom,
+        name:    playerData[i].name || `玩家 ${i + 1}`,
+        chips:   chips,
+        pnl:     calcPnl(i),
+        isHost:  hostIndex === i,
       });
     }
 
@@ -650,6 +728,7 @@
       id:      now.getTime(),
       session: session,
       bottom:  bottom,
+      dong:    dong,
       date:    now.toISOString(),
       players: players,
     };
@@ -667,6 +746,7 @@
     for (let i = 0; i < MAX_COUNT; i++) {
       playerData[i] = { name: '', chips: '' };
     }
+    hostIndex = -1;
     renderPlayerRows();
     updateConfirmBtn();
     updateZeroSum();
@@ -702,13 +782,14 @@
           <span class="record-title">${escHtml(title)}</span>
           <div class="record-meta">
             <span class="record-bottom-tag">底 ${formatMoney(rec.bottom)}</span>
+            ${rec.dong ? `<span class="record-bottom-tag">東 ${formatMoney(rec.dong)}</span>` : ''}
             <button class="record-delete" title="刪除" onclick="deleteRecord(event, ${rec.id})">×</button>
           </div>
         </div>
         <div class="record-body">
           ${rec.players.map(p => `
             <div class="record-player-row">
-              <span class="record-player-name">${escHtml(p.name)}</span>
+              <span class="record-player-name">${escHtml(p.name)}${p.isHost && rec.dong ? ' <small style="color:var(--gold-dim);font-size:0.8em">場主</small>' : ''}</span>
               <span class="record-player-pnl ${pnlClass(p.pnl)}">${formatPnl(p.pnl)}</span>
             </div>
           `).join('')}
@@ -738,9 +819,9 @@
   function getPnlSum() {
     let sum = 0;
     for (let i = 0; i < playerCount; i++) {
-      sum += parseFloat(playerData[i].chips) - bottom;
+      sum += calcPnl(i);
     }
-    return Math.round(sum * 100) / 100; // avoid float drift
+    return Math.round(sum * 100) / 100;
   }
 
   function formatPnl(n) {
