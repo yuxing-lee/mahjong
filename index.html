@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>麻將結算工具</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@400;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0e1012;
+      --surface:   #161a1e;
+      --border:    #2a2e34;
+      --gold:      #c9a84c;
+      --gold-dim:  #8a6e2e;
+      --green:     #4caf82;
+      --red:       #e05252;
+      --muted:     #6b717a;
+      --text:      #e8e2d8;
+      --text-dim:  #9a9488;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Noto Serif TC', serif;
+      min-height: 100vh;
+      padding: 24px 16px 60px;
+    }
+
+    .container {
+      max-width: 520px;
+      margin: 0 auto;
+    }
+
+    /* ── Header ── */
+    header {
+      text-align: center;
+      margin-bottom: 28px;
+    }
+    header h1 {
+      font-size: 1.5rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      color: var(--gold);
+    }
+    header .session-label {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-top: 4px;
+      font-family: 'DM Mono', monospace;
+    }
+
+    /* ── Section card ── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    /* ── Bottom selector ── */
+    .bottom-btns {
+      display: flex;
+      gap: 10px;
+    }
+    .bottom-btn {
+      flex: 1;
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s, background 0.15s;
+    }
+    .bottom-btn.active {
+      border-color: var(--gold);
+      color: var(--gold);
+      background: rgba(201,168,76,0.08);
+    }
+    .bottom-btn:hover:not(.active) {
+      border-color: var(--gold-dim);
+      color: var(--text);
+    }
+
+    /* ── Player count ── */
+    .count-row {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .count-btn {
+      width: 36px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text);
+      font-size: 1.25rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .count-btn:hover:not(:disabled) {
+      border-color: var(--gold-dim);
+      color: var(--gold);
+    }
+    .count-btn:disabled {
+      opacity: 0.3;
+      cursor: default;
+    }
+    .count-display {
+      font-family: 'DM Mono', monospace;
+      font-size: 1.25rem;
+      min-width: 28px;
+      text-align: center;
+    }
+
+    /* ── Player rows ── */
+    .player-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr auto;
+      gap: 10px;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .player-row:last-child { border-bottom: none; }
+    .player-row input {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px 10px;
+      color: var(--text);
+      font-family: 'Noto Serif TC', serif;
+      font-size: 0.9rem;
+      width: 100%;
+      transition: border-color 0.15s;
+      -moz-appearance: textfield;
+    }
+    .player-row input::-webkit-outer-spin-button,
+    .player-row input::-webkit-inner-spin-button { -webkit-appearance: none; }
+    .player-row input:focus {
+      outline: none;
+      border-color: var(--gold-dim);
+    }
+    .player-row input::placeholder { color: var(--muted); }
+    .pnl-display {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.9rem;
+      width: 80px;
+      text-align: right;
+      white-space: nowrap;
+    }
+    .pnl-display.positive { color: var(--green); }
+    .pnl-display.negative { color: var(--red); }
+    .pnl-display.zero     { color: var(--muted); }
+    .pnl-display.empty    { color: transparent; }
+
+    /* ── Zero-sum check ── */
+    .zero-sum-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0 0;
+      margin-top: 10px;
+      border-top: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .zero-sum-row .label { color: var(--muted); }
+    .zero-sum-row .result {
+      font-family: 'DM Mono', monospace;
+      font-weight: 500;
+    }
+    .zero-sum-row .result.ok   { color: var(--green); }
+    .zero-sum-row .result.fail { color: var(--red); }
+
+    /* ── Confirm button ── */
+    .confirm-btn {
+      width: 100%;
+      padding: 14px;
+      border-radius: 10px;
+      border: none;
+      background: var(--gold);
+      color: #0e1012;
+      font-family: 'Noto Serif TC', serif;
+      font-size: 1rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: opacity 0.15s, transform 0.1s;
+      margin-bottom: 16px;
+    }
+    .confirm-btn:disabled {
+      background: var(--border);
+      color: var(--muted);
+      cursor: default;
+    }
+    .confirm-btn:not(:disabled):hover { opacity: 0.88; }
+    .confirm-btn:not(:disabled):active { transform: scale(0.98); }
+
+    /* ── Modal ── */
+    .modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.7);
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      z-index: 100;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s;
+    }
+    .modal-overlay.open {
+      opacity: 1;
+      pointer-events: all;
+    }
+    .modal {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px 16px 0 0;
+      padding: 28px 20px 32px;
+      width: 100%;
+      max-width: 520px;
+      transform: translateY(30px);
+      transition: transform 0.2s;
+    }
+    .modal-overlay.open .modal { transform: translateY(0); }
+    .modal-title {
+      font-size: 1rem;
+      font-weight: 700;
+      color: var(--gold);
+      margin-bottom: 4px;
+    }
+    .modal-date {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 20px;
+    }
+    .modal-player-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .modal-player-row:last-of-type { border-bottom: none; }
+    .modal-player-name { color: var(--text-dim); }
+    .modal-player-chips {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin: 0 8px;
+    }
+    .modal-player-pnl {
+      font-family: 'DM Mono', monospace;
+      font-weight: 500;
+    }
+    .modal-zero-sum {
+      margin-top: 14px;
+      padding: 10px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-family: 'DM Mono', monospace;
+    }
+    .modal-zero-sum.ok   { background: rgba(76,175,130,0.12); color: var(--green); }
+    .modal-zero-sum.fail { background: rgba(224,82,82,0.12);  color: var(--red); }
+    .modal-actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .modal-actions button {
+      flex: 1;
+      padding: 13px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-family: 'Noto Serif TC', serif;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .modal-actions button:hover { opacity: 0.8; }
+    .btn-back { background: transparent; color: var(--text-dim); }
+    .btn-save { background: var(--gold); color: #0e1012; border-color: var(--gold); }
+
+    /* ── History ── */
+    .history-section { margin-top: 8px; }
+    .history-title {
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 12px;
+    }
+    .history-empty {
+      font-size: 0.85rem;
+      color: var(--muted);
+      text-align: center;
+      padding: 20px 0;
+    }
+    .record-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      margin-bottom: 10px;
+      overflow: hidden;
+    }
+    .record-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 14px;
+      cursor: pointer;
+      user-select: none;
+    }
+    .record-header:hover { background: rgba(255,255,255,0.02); }
+    .record-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+    }
+    .record-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .record-bottom-tag {
+      font-family: 'DM Mono', monospace;
+      font-size: 0.72rem;
+      color: var(--gold-dim);
+      background: rgba(201,168,76,0.1);
+      border: 1px solid rgba(201,168,76,0.25);
+      border-radius: 4px;
+      padding: 2px 6px;
+    }
+    .record-delete {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-size: 1rem;
+      cursor: pointer;
+      line-height: 1;
+      padding: 2px 4px;
+      border-radius: 4px;
+      transition: color 0.15s, background 0.15s;
+    }
+    .record-delete:hover { color: var(--red); background: rgba(224,82,82,0.1); }
+    .record-body {
+      display: none;
+      padding: 0 14px 14px;
+      border-top: 1px solid var(--border);
+    }
+    .record-body.open { display: block; }
+    .record-player-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(42,46,52,0.5);
+    }
+    .record-player-row:last-child { border-bottom: none; }
+    .record-player-name { color: var(--text-dim); }
+    .record-player-pnl  { font-family: 'DM Mono', monospace; }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <!-- Header -->
+  <header>
+    <h1>麻將結算</h1>
+    <div class="session-label" id="sessionLabel">第 1 場</div>
+  </header>
+
+  <!-- 底錢 -->
+  <div class="card">
+    <div class="card-title">底錢</div>
+    <div class="bottom-btns">
+      <button class="bottom-btn" data-value="2000" onclick="selectBottom(this)">$2,000</button>
+      <button class="bottom-btn" data-value="5250" onclick="selectBottom(this)">$5,250</button>
+    </div>
+  </div>
+
+  <!-- 玩家人數 -->
+  <div class="card">
+    <div class="card-title">玩家人數</div>
+    <div class="count-row">
+      <button class="count-btn" id="btnMinus" onclick="adjustCount(-1)">−</button>
+      <div class="count-display" id="countDisplay">4</div>
+      <button class="count-btn" id="btnPlus"  onclick="adjustCount(1)">＋</button>
+    </div>
+  </div>
+
+  <!-- 玩家輸入 -->
+  <div class="card">
+    <div class="card-title">玩家籌碼</div>
+    <div id="playerRows"></div>
+    <div class="zero-sum-row" id="zeroSumRow" style="display:none;">
+      <span class="label">零和驗算</span>
+      <span class="result" id="zeroSumResult"></span>
+    </div>
+  </div>
+
+  <!-- 確認結算按鈕 -->
+  <button class="confirm-btn" id="confirmBtn" disabled onclick="openModal()">確認結算</button>
+
+  <!-- 歷史紀錄 -->
+  <div class="history-section">
+    <div class="history-title">歷史紀錄</div>
+    <div id="historyList"></div>
+  </div>
+
+</div>
+
+<!-- Modal -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <div class="modal-title">結算確認</div>
+    <div class="modal-date" id="modalDate"></div>
+    <div id="modalPlayers"></div>
+    <div class="modal-zero-sum" id="modalZeroSum"></div>
+    <div class="modal-actions">
+      <button class="btn-back" onclick="closeModal()">返回</button>
+      <button class="btn-save" onclick="saveRecord()">儲存</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // ── State ──
+  let bottom = null;
+  let playerCount = 4;
+  const MIN_COUNT = 2;
+  const MAX_COUNT = 8;
+
+  // Persistent data
+  let records = JSON.parse(localStorage.getItem('mj_records') || '[]');
+  let session = parseInt(localStorage.getItem('mj_session') || '1', 10);
+
+  // Player name/chips memory (survive count changes)
+  const playerData = Array.from({ length: MAX_COUNT }, () => ({ name: '', chips: '' }));
+
+  // ── Init ──
+  updateSessionLabel();
+  renderPlayerRows();
+  renderHistory();
+
+  // ── Bottom selector ──
+  function selectBottom(btn) {
+    document.querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    bottom = parseInt(btn.dataset.value, 10);
+    updatePnlAll();
+    updateConfirmBtn();
+  }
+
+  // ── Player count ──
+  function adjustCount(delta) {
+    const next = playerCount + delta;
+    if (next < MIN_COUNT || next > MAX_COUNT) return;
+    // Save current inputs before re-render
+    saveCurrentInputs();
+    playerCount = next;
+    updateCountUI();
+    renderPlayerRows();
+    updateConfirmBtn();
+  }
+
+  function updateCountUI() {
+    document.getElementById('countDisplay').textContent = playerCount;
+    document.getElementById('btnMinus').disabled = playerCount <= MIN_COUNT;
+    document.getElementById('btnPlus').disabled  = playerCount >= MAX_COUNT;
+  }
+
+  function saveCurrentInputs() {
+    for (let i = 0; i < MAX_COUNT; i++) {
+      const nameEl  = document.getElementById(`name-${i}`);
+      const chipsEl = document.getElementById(`chips-${i}`);
+      if (nameEl)  playerData[i].name  = nameEl.value;
+      if (chipsEl) playerData[i].chips = chipsEl.value;
+    }
+  }
+
+  // ── Player rows ──
+  function renderPlayerRows() {
+    const container = document.getElementById('playerRows');
+    container.innerHTML = '';
+    for (let i = 0; i < playerCount; i++) {
+      const row = document.createElement('div');
+      row.className = 'player-row';
+      row.innerHTML = `
+        <input type="text"   id="name-${i}"  placeholder="玩家 ${i + 1}"
+               value="${escHtml(playerData[i].name)}"
+               oninput="onNameInput(${i}, this.value)" />
+        <input type="number" id="chips-${i}" placeholder="籌碼數"
+               value="${escHtml(playerData[i].chips)}"
+               oninput="onChipsInput(${i}, this.value)" />
+        <div class="pnl-display empty" id="pnl-${i}">—</div>
+      `;
+      container.appendChild(row);
+    }
+    updatePnlAll();
+    updateZeroSum();
+    updateCountUI();
+  }
+
+  function onNameInput(i, val) {
+    playerData[i].name = val;
+  }
+
+  function onChipsInput(i, val) {
+    playerData[i].chips = val;
+    updatePnl(i);
+    updateZeroSum();
+    updateConfirmBtn();
+  }
+
+  function updatePnl(i) {
+    const el = document.getElementById(`pnl-${i}`);
+    if (!el) return;
+    const chips = playerData[i].chips;
+    if (chips === '' || bottom === null) {
+      el.textContent = '—';
+      el.className = 'pnl-display empty';
+      return;
+    }
+    const pnl = parseFloat(chips) - bottom;
+    el.textContent = formatPnl(pnl);
+    el.className = 'pnl-display ' + pnlClass(pnl);
+  }
+
+  function updatePnlAll() {
+    for (let i = 0; i < playerCount; i++) updatePnl(i);
+  }
+
+  // ── Zero-sum ──
+  function updateZeroSum() {
+    const allFilled = allChipsFilled();
+    const row = document.getElementById('zeroSumRow');
+    const res = document.getElementById('zeroSumResult');
+    if (!allFilled || bottom === null) {
+      row.style.display = 'none';
+      return;
+    }
+    row.style.display = 'flex';
+    const total = getPnlSum();
+    if (total === 0) {
+      res.textContent = '✓ 零和';
+      res.className = 'result ok';
+    } else {
+      res.textContent = `✗ 不符  ${formatPnl(total)}`;
+      res.className = 'result fail';
+    }
+  }
+
+  // ── Confirm button ──
+  function updateConfirmBtn() {
+    const btn = document.getElementById('confirmBtn');
+    btn.disabled = !(bottom !== null && allChipsFilled());
+  }
+
+  function allChipsFilled() {
+    for (let i = 0; i < playerCount; i++) {
+      if (playerData[i].chips === '') return false;
+    }
+    return true;
+  }
+
+  // ── Modal ──
+  function openModal() {
+    saveCurrentInputs();
+    const now = new Date();
+    document.getElementById('modalDate').textContent = formatDatetime(now);
+
+    // Players
+    const playersEl = document.getElementById('modalPlayers');
+    playersEl.innerHTML = '';
+    for (let i = 0; i < playerCount; i++) {
+      const name  = playerData[i].name || `玩家 ${i + 1}`;
+      const chips = parseFloat(playerData[i].chips);
+      const pnl   = chips - bottom;
+      const row = document.createElement('div');
+      row.className = 'modal-player-row';
+      row.innerHTML = `
+        <span class="modal-player-name">${escHtml(name)}</span>
+        <span class="modal-player-chips">${chips.toLocaleString()}</span>
+        <span class="modal-player-pnl ${pnlClass(pnl)}">${formatPnl(pnl)}</span>
+      `;
+      playersEl.appendChild(row);
+    }
+
+    // Zero-sum
+    const total = getPnlSum();
+    const zs = document.getElementById('modalZeroSum');
+    if (total === 0) {
+      zs.textContent = '✓ 零和驗算通過';
+      zs.className = 'modal-zero-sum ok';
+    } else {
+      zs.textContent = `✗ 零和不符  差額 ${formatPnl(total)}`;
+      zs.className = 'modal-zero-sum fail';
+    }
+
+    document.getElementById('modalOverlay').classList.add('open');
+  }
+
+  function closeModal() {
+    document.getElementById('modalOverlay').classList.remove('open');
+  }
+
+  // Close on overlay click
+  document.getElementById('modalOverlay').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  // ── Save ──
+  function saveRecord() {
+    saveCurrentInputs();
+    const now = new Date();
+    const players = [];
+    for (let i = 0; i < playerCount; i++) {
+      const chips = parseFloat(playerData[i].chips);
+      players.push({
+        name:  playerData[i].name || `玩家 ${i + 1}`,
+        chips: chips,
+        pnl:   chips - bottom,
+      });
+    }
+
+    const record = {
+      id:      now.getTime(),
+      session: session,
+      bottom:  bottom,
+      date:    now.toISOString(),
+      players: players,
+    };
+
+    records.unshift(record);
+    localStorage.setItem('mj_records', JSON.stringify(records));
+
+    session++;
+    localStorage.setItem('mj_session', session);
+
+    // Notion integration hook (no-op until implemented)
+    notifyNotion(record);
+
+    // Clear inputs
+    for (let i = 0; i < MAX_COUNT; i++) {
+      playerData[i] = { name: '', chips: '' };
+    }
+    renderPlayerRows();
+    updateConfirmBtn();
+    updateZeroSum();
+
+    closeModal();
+    updateSessionLabel();
+    renderHistory();
+  }
+
+  // ── Notion stub ──
+  function notifyNotion(record) {
+    // TODO: POST to Notion API when integration is ready
+    // console.log('Notion record:', record);
+  }
+
+  // ── History ──
+  function renderHistory() {
+    const list = document.getElementById('historyList');
+    if (records.length === 0) {
+      list.innerHTML = '<div class="history-empty">尚無紀錄</div>';
+      return;
+    }
+    list.innerHTML = '';
+    records.forEach((rec, idx) => {
+      const card = document.createElement('div');
+      card.className = 'record-card';
+
+      const d = new Date(rec.date);
+      const title = `第 ${rec.session} 場　${formatDatetime(d)}`;
+
+      card.innerHTML = `
+        <div class="record-header" onclick="toggleRecord(this)">
+          <span class="record-title">${escHtml(title)}</span>
+          <div class="record-meta">
+            <span class="record-bottom-tag">底 ${formatMoney(rec.bottom)}</span>
+            <button class="record-delete" title="刪除" onclick="deleteRecord(event, ${rec.id})">×</button>
+          </div>
+        </div>
+        <div class="record-body">
+          ${rec.players.map(p => `
+            <div class="record-player-row">
+              <span class="record-player-name">${escHtml(p.name)}</span>
+              <span class="record-player-pnl ${pnlClass(p.pnl)}">${formatPnl(p.pnl)}</span>
+            </div>
+          `).join('')}
+        </div>
+      `;
+      list.appendChild(card);
+    });
+  }
+
+  function toggleRecord(header) {
+    const body = header.nextElementSibling;
+    body.classList.toggle('open');
+  }
+
+  function deleteRecord(e, id) {
+    e.stopPropagation();
+    records = records.filter(r => r.id !== id);
+    localStorage.setItem('mj_records', JSON.stringify(records));
+    renderHistory();
+  }
+
+  // ── Helpers ──
+  function updateSessionLabel() {
+    document.getElementById('sessionLabel').textContent = `第 ${session} 場`;
+  }
+
+  function getPnlSum() {
+    let sum = 0;
+    for (let i = 0; i < playerCount; i++) {
+      sum += parseFloat(playerData[i].chips) - bottom;
+    }
+    return Math.round(sum * 100) / 100; // avoid float drift
+  }
+
+  function formatPnl(n) {
+    const abs = Math.abs(n).toLocaleString();
+    return n >= 0 ? `+$${abs}` : `-$${abs}`;
+  }
+
+  function formatMoney(n) {
+    return `$${n.toLocaleString()}`;
+  }
+
+  function formatDatetime(d) {
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  }
+
+  function pnlClass(n) {
+    if (n > 0) return 'positive';
+    if (n < 0) return 'negative';
+    return 'zero';
+  }
+
+  function escHtml(str) {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+</script>
+</body>
+</html>
