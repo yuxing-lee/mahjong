@@ -698,12 +698,18 @@
   function updateDongTotal() {
     const el = document.getElementById('dongSummary');
     if (!el) return;
-    if (dong === 0) { el.style.display = 'none'; return; }
-    const total = dongTotal();
-    const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
-    const formula = `$${dong.toLocaleString()} × ${rounds}將`;
+  
+    if (dong === 0) {
+      el.style.display = 'none';
+      return;
+    }
+  
+    const perPlayer = dong * rounds;
+    const total = perPlayer * playerCount;
+  
     el.style.display = 'block';
-    el.textContent = `東錢合計：${formula} = $${total.toLocaleString()}（${hostName}收）`;
+    el.textContent =
+      `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
   }
 
   // ── Host selector ──
@@ -819,21 +825,26 @@
     const allFilled = allChipsFilled();
     const row = document.getElementById('zeroSumRow');
     const res = document.getElementById('zeroSumResult');
+  
     if (!allFilled || bottom === null) {
       row.style.display = 'none';
       return;
     }
+  
     row.style.display = 'flex';
-    const total = getPnlSum();
-    if (total === 0) {
-      res.textContent = '✓ 零和';
+  
+    const playerSum = getPlayerSum();
+    const dongPnl = getDongPnl();
+    const final = getFinalSum();
+  
+    if (final === 0) {
+      res.textContent = `✓ 平衡（玩家 ${formatPnl(playerSum)} + 東家 ${formatPnl(dongPnl)}）`;
       res.className = 'result ok';
     } else {
-      res.textContent = `✗ 不符  ${formatPnl(total)}`;
+      res.textContent = `✗ 不符 最終 ${formatPnl(final)}`;
       res.className = 'result fail';
     }
   }
-
   // ── Confirm button ──
   function updateConfirmBtn() {
     const btn = document.getElementById('confirmBtn');
@@ -877,7 +888,11 @@
       const dt = dongTotal();
       const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
       const formula = `$${dong.toLocaleString()} × ${rounds}將`;
-      modalDong.textContent = `東錢合計：${formula} = $${dt.toLocaleString()}（${hostName}收）`;
+      const perPlayer = dong * rounds;
+      const total = perPlayer * playerCount;
+      
+      modalDong.textContent =
+        `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
       modalDong.style.display = 'block';
     } else {
       modalDong.style.display = 'none';
@@ -895,6 +910,19 @@
     }
 
     document.getElementById('modalOverlay').classList.add('open');
+    // 東家（第5人）
+  if (dong > 0) {
+    const hostPnl = getDongPnl();
+  
+    const row = document.createElement('div');
+    row.className = 'modal-player-row';
+    row.innerHTML = `
+      <span class="modal-player-name" style="color:var(--gold)">東家（場主）</span>
+      <span class="modal-player-chips">—</span>
+      <span class="modal-player-pnl positive">+${hostPnl.toLocaleString()}</span>
+    `;
+    playersEl.appendChild(row);
+  }
   }
 
   function closeModal() {
@@ -960,7 +988,10 @@
     // TODO: POST to Notion API when integration is ready
     // console.log('Notion record:', record);
   }
-
+  function getDongPnl() {
+    if (dong === 0) return 0;
+    return dong * rounds * playerCount;
+  }
   // ── History ──
   function renderHistory() {
     const list = document.getElementById('historyList');
@@ -1015,12 +1046,16 @@
     document.getElementById('sessionLabel').textContent = `第 ${session} 場`;
   }
 
-  function getPnlSum() {
+  function getPlayerSum() {
     let sum = 0;
     for (let i = 0; i < playerCount; i++) {
       sum += calcPnl(i);
     }
     return Math.round(sum * 100) / 100;
+  }
+
+  function getFinalSum() {
+    return getPlayerSum() + getDongPnl();
   }
 
   function formatPnl(n) {
