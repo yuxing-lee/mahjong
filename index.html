@@ -441,7 +441,8 @@
       <button class="count-btn" id="btnRoundsMinus" onclick="adjustRounds(-1)">−</button>
       <div class="count-display" id="roundsDisplay">1</div>
       <button class="count-btn" id="btnRoundsPlus"  onclick="adjustRounds(1)">＋</button>
-      <span style="font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--gold); margin-left:12px; min-width:80px; text-align:right;" id="dongTotal"></span>
+    </div>
+    <div id="dongSummary" style="display:none; margin-top:10px; padding:8px 12px; background:rgba(201,168,76,0.07); border-radius:6px; font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--gold);">
     </div>
   </div>
 
@@ -482,6 +483,7 @@
     <div class="modal-title">結算確認</div>
     <div class="modal-date" id="modalDate"></div>
     <div id="modalPlayers"></div>
+    <div id="modalDong" style="display:none; margin-top:10px; padding:10px 12px; border-radius:8px; background:rgba(201,168,76,0.08); border:1px solid rgba(201,168,76,0.2); font-family:'DM Mono',monospace; font-size:0.82rem; color:var(--gold);"></div>
     <div class="modal-zero-sum" id="modalZeroSum"></div>
     <div class="modal-actions">
       <button class="btn-back" onclick="closeModal()">返回</button>
@@ -543,15 +545,19 @@
     document.getElementById('roundsDisplay').textContent = rounds;
     document.getElementById('btnRoundsMinus').disabled = rounds <= 1;
     updateDongTotal();
-    updatePnlAll();
-    updateZeroSum();
   }
 
   function updateDongTotal() {
-    const el = document.getElementById('dongTotal');
+    const el = document.getElementById('dongSummary');
     if (!el) return;
-    const total = dong * rounds;
-    el.textContent = total > 0 ? `共 $${total.toLocaleString()}` : '';
+    if (dong === 0) { el.style.display = 'none'; return; }
+    const total = dongTotal();
+    const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
+    const formula = rounds > 1
+      ? `$${dong.toLocaleString()} × ${rounds}將 × ${playerCount}人`
+      : `$${dong.toLocaleString()} × ${playerCount}人`;
+    el.style.display = 'block';
+    el.textContent = `東錢合計：${formula} = $${total.toLocaleString()}（${hostName}收）`;
   }
 
   // ── Host selector ──
@@ -569,17 +575,18 @@
     }
     updatePnlAll();
     updateZeroSum();
+    updateDongTotal();
   }
 
   // ── Player count ──
   function adjustCount(delta) {
     const next = playerCount + delta;
     if (next < MIN_COUNT || next > MAX_COUNT) return;
-    // Save current inputs before re-render
     saveCurrentInputs();
     playerCount = next;
     updateCountUI();
     renderPlayerRows();
+    updateDongTotal();
     updateConfirmBtn();
   }
 
@@ -635,11 +642,11 @@
   }
 
   function calcPnl(i) {
-    const chips = parseFloat(playerData[i].chips);
-    const totalDong = dong * rounds;
-    const dongAdj = totalDong === 0 ? 0
-      : (hostIndex === i ? totalDong * (playerCount - 1) : -totalDong);
-    return chips - bottom + dongAdj;
+    return parseFloat(playerData[i].chips) - bottom;
+  }
+
+  function dongTotal() {
+    return dong * rounds * playerCount;
   }
 
   function updatePnl(i) {
@@ -708,16 +715,30 @@
       const pnl   = calcPnl(i);
       const row = document.createElement('div');
       row.className = 'modal-player-row';
-      const isHost = hostIndex === i && dong > 0;
+      const isHost = hostIndex === i;
       row.innerHTML = `
-        <span class="modal-player-name">${escHtml(name)}${isHost ? ' <small style="color:var(--gold);font-size:0.7em">場主</small>' : ''}</span>
+        <span class="modal-player-name">${escHtml(name)}${isHost && dong > 0 ? ' <small style="color:var(--gold);font-size:0.7em">場主</small>' : ''}</span>
         <span class="modal-player-chips">${chips.toLocaleString()}</span>
         <span class="modal-player-pnl ${pnlClass(pnl)}">${formatPnl(pnl)}</span>
       `;
       playersEl.appendChild(row);
     }
 
-    // Zero-sum
+    // 東錢
+    const modalDong = document.getElementById('modalDong');
+    if (dong > 0) {
+      const dt = dongTotal();
+      const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
+      const formula = rounds > 1
+        ? `$${dong.toLocaleString()} × ${rounds}將 × ${playerCount}人`
+        : `$${dong.toLocaleString()} × ${playerCount}人`;
+      modalDong.textContent = `東錢合計：${formula} = $${dt.toLocaleString()}（${hostName}收）`;
+      modalDong.style.display = 'block';
+    } else {
+      modalDong.style.display = 'none';
+    }
+
+    // Zero-sum (chip-based only)
     const total = getPnlSum();
     const zs = document.getElementById('modalZeroSum');
     if (total === 0) {
@@ -748,21 +769,22 @@
     for (let i = 0; i < playerCount; i++) {
       const chips = parseFloat(playerData[i].chips);
       players.push({
-        name:    playerData[i].name || `玩家 ${i + 1}`,
-        chips:   chips,
-        pnl:     calcPnl(i),
-        isHost:  hostIndex === i,
+        name:   playerData[i].name || `玩家 ${i + 1}`,
+        chips:  chips,
+        pnl:    calcPnl(i),
+        isHost: hostIndex === i,
       });
     }
 
     const record = {
-      id:      now.getTime(),
-      session: session,
-      bottom:  bottom,
-      dong:    dong,
-      rounds:  rounds,
-      date:    now.toISOString(),
-      players: players,
+      id:        now.getTime(),
+      session:   session,
+      bottom:    bottom,
+      dong:      dong,
+      rounds:    rounds,
+      dongTotal: dongTotal(),
+      date:      now.toISOString(),
+      players:   players,
     };
 
     records.unshift(record);
@@ -814,7 +836,7 @@
           <span class="record-title">${escHtml(title)}</span>
           <div class="record-meta">
             <span class="record-bottom-tag">底 ${formatMoney(rec.bottom)}</span>
-            ${rec.dong ? `<span class="record-bottom-tag">東 ${formatMoney(rec.dong)}${rec.rounds > 1 ? `×${rec.rounds}將` : ''}</span>` : ''}
+            ${rec.dong ? `<span class="record-bottom-tag">東 ${formatMoney(rec.dongTotal || rec.dong)}</span>` : ''}
             <button class="record-delete" title="刪除" onclick="deleteRecord(event, ${rec.id})">×</button>
           </div>
         </div>
