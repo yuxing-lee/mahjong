@@ -135,7 +135,7 @@
     /* ── Player rows ── */
     .player-row {
       display: grid;
-      grid-template-columns: 1fr 1fr auto auto;
+      grid-template-columns: 1fr 1fr auto auto auto;
       gap: 10px;
       align-items: center;
       padding: 10px 0;
@@ -172,6 +172,88 @@
     .pnl-display.negative { color: var(--red); }
     .pnl-display.zero     { color: var(--muted); }
     .pnl-display.empty    { color: transparent; }
+
+    /* ── Frequent players ── */
+    .freq-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 12px;
+      min-height: 28px;
+    }
+    .freq-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: var(--bg);
+      color: var(--text-dim);
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: border-color 0.15s, color 0.15s;
+    }
+    .freq-pill:hover {
+      border-color: var(--gold-dim);
+      color: var(--text);
+    }
+    .freq-pill .pill-del {
+      color: var(--muted);
+      font-size: 0.8rem;
+      line-height: 1;
+      padding: 0 2px;
+      border-radius: 50%;
+      transition: color 0.15s;
+    }
+    .freq-pill .pill-del:hover { color: var(--red); }
+    .freq-add-row {
+      display: flex;
+      gap: 8px;
+    }
+    .freq-add-row input {
+      flex: 1;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 7px 10px;
+      color: var(--text);
+      font-family: 'Noto Serif TC', serif;
+      font-size: 0.85rem;
+    }
+    .freq-add-row input:focus { outline: none; border-color: var(--gold-dim); }
+    .freq-add-row input::placeholder { color: var(--muted); }
+    .freq-add-btn {
+      padding: 7px 14px;
+      border-radius: 6px;
+      border: 1px solid var(--gold-dim);
+      background: transparent;
+      color: var(--gold);
+      font-size: 0.85rem;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+    .freq-add-btn:hover { background: rgba(201,168,76,0.1); }
+    .freq-empty { font-size: 0.8rem; color: var(--muted); }
+
+    /* ── Save-to-freq btn on player row ── */
+    .save-freq-btn {
+      width: 28px;
+      height: 28px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.7rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color 0.15s, border-color 0.15s;
+      align-self: center;
+    }
+    .save-freq-btn:hover { color: var(--gold); border-color: var(--gold-dim); }
 
     /* ── Host badge ── */
     .host-btn {
@@ -456,6 +538,17 @@
     </div>
   </div>
 
+  <!-- 常用玩家 -->
+  <div class="card">
+    <div class="card-title">常用玩家</div>
+    <div class="freq-pills" id="freqPills"></div>
+    <div class="freq-add-row">
+      <input type="text" id="freqInput" placeholder="輸入名字後新增" maxlength="10"
+             onkeydown="if(event.key==='Enter') addFreqPlayer()" />
+      <button class="freq-add-btn" onclick="addFreqPlayer()">＋ 新增</button>
+    </div>
+  </div>
+
   <!-- 玩家輸入 -->
   <div class="card">
     <div class="card-title">玩家籌碼</div>
@@ -503,16 +596,71 @@
   const MAX_COUNT = 8;
 
   // Persistent data
-  let records = JSON.parse(localStorage.getItem('mj_records') || '[]');
-  let session = parseInt(localStorage.getItem('mj_session') || '1', 10);
+  let records    = JSON.parse(localStorage.getItem('mj_records')  || '[]');
+  let session    = parseInt(localStorage.getItem('mj_session')    || '1', 10);
+  let freqPlayers = JSON.parse(localStorage.getItem('mj_players') || '[]');
 
   // Player name/chips memory (survive count changes)
   const playerData = Array.from({ length: MAX_COUNT }, () => ({ name: '', chips: '' }));
 
   // ── Init ──
   updateSessionLabel();
+  renderFreqPlayers();
   renderPlayerRows();
   renderHistory();
+
+  // ── Frequent players ──
+  function renderFreqPlayers() {
+    const el = document.getElementById('freqPills');
+    if (!el) return;
+    if (freqPlayers.length === 0) {
+      el.innerHTML = '<span class="freq-empty">尚無常用玩家</span>';
+      return;
+    }
+    el.innerHTML = freqPlayers.map((name, idx) => `
+      <span class="freq-pill" onclick="fillFreqPlayer('${escHtml(name)}')">
+        ${escHtml(name)}
+        <span class="pill-del" onclick="event.stopPropagation(); deleteFreqPlayer(${idx})">×</span>
+      </span>
+    `).join('');
+  }
+
+  function addFreqPlayer() {
+    const input = document.getElementById('freqInput');
+    const name = input.value.trim();
+    if (!name || freqPlayers.includes(name)) { input.value = ''; return; }
+    freqPlayers.push(name);
+    localStorage.setItem('mj_players', JSON.stringify(freqPlayers));
+    input.value = '';
+    renderFreqPlayers();
+  }
+
+  function deleteFreqPlayer(idx) {
+    freqPlayers.splice(idx, 1);
+    localStorage.setItem('mj_players', JSON.stringify(freqPlayers));
+    renderFreqPlayers();
+  }
+
+  function fillFreqPlayer(name) {
+    // Fill into the next empty name slot
+    for (let i = 0; i < playerCount; i++) {
+      const el = document.getElementById(`name-${i}`);
+      if (el && el.value.trim() === '') {
+        el.value = name;
+        playerData[i].name = name;
+        return;
+      }
+    }
+  }
+
+  function saveNameToFreq(i) {
+    const el = document.getElementById(`name-${i}`);
+    const name = el ? el.value.trim() : playerData[i].name.trim();
+    if (!name || freqPlayers.includes(name)) return;
+    freqPlayers.push(name);
+    localStorage.setItem('mj_players', JSON.stringify(freqPlayers));
+    renderFreqPlayers();
+  }
 
   // ── Bottom selector ──
   function selectBottom(btn) {
@@ -620,6 +768,7 @@
                value="${escHtml(playerData[i].chips)}"
                oninput="onChipsInput(${i}, this.value)" />
         <div class="pnl-display empty" id="pnl-${i}">—</div>
+        <button class="save-freq-btn" onclick="saveNameToFreq(${i})" title="存入常用">★</button>
         <button class="host-btn${hostIndex === i ? ' active' : ''}" id="host-${i}"
                 onclick="selectHost(${i})" title="設為場主">莊</button>
       `;
