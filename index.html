@@ -704,9 +704,9 @@
       return;
     }
   
-    const perPlayer = dong * rounds;
-    const total = perPlayer * playerCount;
-  
+    const total = dong * rounds;
+    const perPlayer = total / playerCount;
+
     el.style.display = 'block';
     el.textContent =
       `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
@@ -888,9 +888,9 @@
       const dt = dongTotal();
       const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
       const formula = `$${dong.toLocaleString()} × ${rounds}將`;
-      const perPlayer = dong * rounds;
-      const total = perPlayer * playerCount;
-      
+      const total = dong * rounds;
+      const perPlayer = total / playerCount;
+
       modalDong.textContent =
         `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
       modalDong.style.display = 'block';
@@ -899,7 +899,7 @@
     }
 
     // Zero-sum (chip-based only)
-    const total = getPnlSum();
+    const total = getPlayerSum();
     const zs = document.getElementById('modalZeroSum');
     if (total === 0) {
       zs.textContent = '✓ 零和驗算通過';
@@ -990,7 +990,7 @@
   }
   function getDongPnl() {
     if (dong === 0) return 0;
-    return dong * rounds * playerCount;
+    return dong * rounds;
   }
   // ── History ──
   function renderHistory() {
