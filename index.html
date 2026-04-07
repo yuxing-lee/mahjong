@@ -268,7 +268,7 @@
       display: flex;
       align-items: center;
       justify-content: center;
-      transition: border-color 0.15s, color 0.15s, background 0.15s;
+      transition: border-color 0.15s, color 0.15s, background 0.15s, opacity 0.15s;
       white-space: nowrap;
       flex-shrink: 0;
     }
@@ -277,9 +277,26 @@
       color: var(--gold);
       background: rgba(201,168,76,0.1);
     }
-    .host-btn:hover:not(.active) {
+    .host-btn:hover:not(.active):not(.inactive) {
       border-color: var(--gold-dim);
       color: var(--text);
+    }
+    .host-btn.inactive {
+      opacity: 0.15;
+      pointer-events: none;
+      cursor: default;
+    }
+
+    /* ── Dong host warning ── */
+    .dong-host-hint {
+      margin-top: 8px;
+      padding: 7px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-family: 'DM Mono', monospace;
+      background: rgba(224,82,82,0.08);
+      border: 1px solid rgba(224,82,82,0.25);
+      color: var(--red);
     }
 
     /* ── Zero-sum check ── */
@@ -512,7 +529,7 @@
 
   <!-- 東錢 -->
   <div class="card">
-    <div class="card-title">東錢（每將・每人付給場主）</div>
+    <div class="card-title">東錢（場主每將收入）</div>
     <div class="bottom-btns">
       <button class="bottom-btn" data-value="0"   onclick="selectDong(this)">無</button>
       <button class="bottom-btn" data-value="200"  onclick="selectDong(this)">$200</button>
@@ -525,6 +542,9 @@
       <button class="count-btn" id="btnRoundsPlus"  onclick="adjustRounds(1)">＋</button>
     </div>
     <div id="dongSummary" style="display:none; margin-top:10px; padding:8px 12px; background:rgba(201,168,76,0.07); border-radius:6px; font-family:'DM Mono',monospace; font-size:0.8rem; color:var(--gold);">
+    </div>
+    <div id="dongHostHint" class="dong-host-hint" style="display:none;">
+      ↑ 請點選玩家旁的「莊」按鈕指定場主
     </div>
   </div>
 
@@ -575,6 +595,7 @@
   <div class="modal">
     <div class="modal-title">結算確認</div>
     <div class="modal-date" id="modalDate"></div>
+    <div id="modalMeta" style="margin-bottom:16px; font-family:'DM Mono',monospace; font-size:0.78rem; color:var(--muted);"></div>
     <div id="modalPlayers"></div>
     <div id="modalDong" style="display:none; margin-top:10px; padding:10px 12px; border-radius:8px; background:rgba(201,168,76,0.08); border:1px solid rgba(201,168,76,0.2); font-family:'DM Mono',monospace; font-size:0.82rem; color:var(--gold);"></div>
     <div class="modal-zero-sum" id="modalZeroSum"></div>
@@ -677,9 +698,11 @@
     btn.closest('.bottom-btns').querySelectorAll('.bottom-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     dong = parseInt(btn.dataset.value, 10);
+    if (dong === 0) hostIndex = -1;
     const row = document.getElementById('dongRoundsRow');
     row.style.display = dong > 0 ? 'flex' : 'none';
     updateDongTotal();
+    updateHostBtnStates();
     updatePnlAll();
     updateZeroSum();
     updateConfirmBtn();
@@ -697,30 +720,44 @@
 
   function updateDongTotal() {
     const el = document.getElementById('dongSummary');
+    const hint = document.getElementById('dongHostHint');
     if (!el) return;
-  
+
     if (dong === 0) {
       el.style.display = 'none';
+      if (hint) hint.style.display = 'none';
       return;
     }
-  
-    const perPlayer = dong * rounds;
-    const total = perPlayer * playerCount;
-  
+
+    const total = dong * rounds;
+    const perPlayer = total / playerCount;
+
     el.style.display = 'block';
     el.textContent =
       `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
+
+    if (hint) hint.style.display = hostIndex === -1 ? 'block' : 'none';
+  }
+
+  function updateHostBtnStates() {
+    for (let i = 0; i < playerCount; i++) {
+      const btn = document.getElementById(`host-${i}`);
+      if (!btn) continue;
+      if (dong === 0) {
+        btn.classList.add('inactive');
+      } else {
+        btn.classList.remove('inactive');
+      }
+    }
   }
 
   // ── Host selector ──
   function selectHost(i) {
     if (hostIndex === i) {
-      // deselect
       hostIndex = -1;
     } else {
       hostIndex = i;
     }
-    // update all host buttons
     for (let j = 0; j < playerCount; j++) {
       const btn = document.getElementById(`host-${j}`);
       if (btn) btn.className = 'host-btn' + (hostIndex === j ? ' active' : '');
@@ -781,6 +818,7 @@
     updatePnlAll();
     updateZeroSum();
     updateCountUI();
+    updateHostBtnStates();
   }
 
   function onNameInput(i, val) {
@@ -864,6 +902,17 @@
     const now = new Date();
     document.getElementById('modalDate').textContent = formatDatetime(now);
 
+    // Meta: 底錢 + 東錢
+    const metaEl = document.getElementById('modalMeta');
+    if (metaEl) {
+      let metaParts = [`底 $${(bottom || 0).toLocaleString()}`];
+      if (dong > 0) {
+        const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
+        metaParts.push(`東 $${(dong * rounds).toLocaleString()}（${rounds}將 · ${hostName}收）`);
+      }
+      metaEl.textContent = metaParts.join('　·　');
+    }
+
     // Players
     const playersEl = document.getElementById('modalPlayers');
     playersEl.innerHTML = '';
@@ -888,9 +937,9 @@
       const dt = dongTotal();
       const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
       const formula = `$${dong.toLocaleString()} × ${rounds}將`;
-      const perPlayer = dong * rounds;
-      const total = perPlayer * playerCount;
-      
+      const total = dong * rounds;
+      const perPlayer = total / playerCount;
+
       modalDong.textContent =
         `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
       modalDong.style.display = 'block';
@@ -899,7 +948,7 @@
     }
 
     // Zero-sum (chip-based only)
-    const total = getPnlSum();
+    const total = getPlayerSum();
     const zs = document.getElementById('modalZeroSum');
     if (total === 0) {
       zs.textContent = '✓ 零和驗算通過';
@@ -990,7 +1039,7 @@
   }
   function getDongPnl() {
     if (dong === 0) return 0;
-    return dong * rounds * playerCount;
+    return dong * rounds;
   }
   // ── History ──
   function renderHistory() {
