@@ -609,7 +609,7 @@
 <script>
   // ── State ──
   let bottom = null;
-  let dong = 0;       // 東錢 per 將 per player
+  let dong = 0;       // 東錢 per 將 (場主每將總收入)
   let rounds = 1;     // 將數
   let hostIndex = -1; // which player is 場主 (-1 = none)
   let playerCount = 4;
@@ -934,12 +934,7 @@
     // 東錢
     const modalDong = document.getElementById('modalDong');
     if (dong > 0) {
-      const dt = dongTotal();
-      const hostName = hostIndex >= 0 ? (playerData[hostIndex].name || `玩家 ${hostIndex + 1}`) : '場主';
-      const formula = `$${dong.toLocaleString()} × ${rounds}將`;
       const total = dong * rounds;
-      const perPlayer = total / playerCount;
-
       modalDong.textContent =
         `東家收：$${total.toLocaleString()}（$${dong.toLocaleString()} × ${rounds}將）`;
       modalDong.style.display = 'block';
@@ -947,14 +942,14 @@
       modalDong.style.display = 'none';
     }
 
-    // Zero-sum (chip-based only)
-    const total = getPlayerSum();
+    // Zero-sum (玩家籌碼 + 東家收入)
+    const finalSum = getFinalSum();
     const zs = document.getElementById('modalZeroSum');
-    if (total === 0) {
+    if (finalSum === 0) {
       zs.textContent = '✓ 零和驗算通過';
       zs.className = 'modal-zero-sum ok';
     } else {
-      zs.textContent = `✗ 零和不符  差額 ${formatPnl(total)}`;
+      zs.textContent = `✗ 零和不符  差額 ${formatPnl(finalSum)}`;
       zs.className = 'modal-zero-sum fail';
     }
 
