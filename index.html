@@ -941,7 +941,7 @@
       const perPlayer = total / playerCount;
 
       modalDong.textContent =
-        `每人付：$${perPlayer.toLocaleString()}，東家收：$${total.toLocaleString()}`;
+        `東家收：$${total.toLocaleString()}（$${dong.toLocaleString()} × ${rounds}將）`;
       modalDong.style.display = 'block';
     } else {
       modalDong.style.display = 'none';
