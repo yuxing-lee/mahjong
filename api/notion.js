@@ -43,6 +43,10 @@ function buildNotionPage(record) {
     const hostTag = (p.isHost && record.dong) ? '（場主）' : '';
     return `${p.name}${hostTag}：${sign}$${fmt(Math.abs(p.pnl))}`;
   });
+  if (record.dong > 0) {
+    const total = record.dongTotal || record.dong * (record.rounds || 1);
+    playerLines.push(`東家收入：+$${fmt(total)}`);
+  }
 
   return {
     parent: { database_id: NOTION_DB_ID },
