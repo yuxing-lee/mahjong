@@ -73,8 +73,8 @@ function postToNotion(body) {
 // ── HTTP server ──────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
 
-  // POST /api/notion/record — proxy mahjong record to Notion
-  if (req.method === 'POST' && req.url === '/api/notion/record') {
+  // POST /api/notion — proxy mahjong record to Notion
+  if (req.method === 'POST' && req.url === '/api/notion') {
     if (!NOTION_TOKEN || !NOTION_DB_ID) {
       res.writeHead(503, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'Notion not configured on server' }));
