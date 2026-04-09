@@ -1067,15 +1067,27 @@
       });
       if (res.ok) {
         showToast('已同步至 Notion', 'success');
-      } else {
-        const err = await res.json().catch(() => ({}));
-        if (err.error === 'Notion not configured') return; // 未設定環境變數時靜默
-        showToast('Notion 同步失敗', 'error');
-        console.error('Notion error:', err);
+        return;
       }
+      const err = await res.json().catch(() => ({}));
+      if (err.error === 'Notion not configured') return; // 未設定環境變數時靜默
+      // 顯示 Notion 回傳的具體原因
+      const reason = notionErrMsg(err);
+      showToast(`Notion 失敗：${reason}`, 'error');
+      console.error('Notion error:', err);
     } catch {
       // 非 Vercel 環境（本機直開 HTML）時靜默
     }
+  }
+
+  function notionErrMsg(err) {
+    const code = err.code || '';
+    if (code === 'unauthorized')      return 'Token 無效';
+    if (code === 'object_not_found')  return '找不到資料庫（請確認 Integration 已連結）';
+    if (code === 'validation_error')  return `格式錯誤：${err.message || ''}`;
+    if (code === 'restricted_resource') return 'Integration 無此資料庫存取權';
+    if (err.error)                    return err.error;
+    return err.message || '未知錯誤';
   }
 
   // ── Toast ──

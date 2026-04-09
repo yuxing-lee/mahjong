@@ -1,31 +1,39 @@
 const https = require('https');
 
-const NOTION_TOKEN = process.env.NOTION_TOKEN || '';
-const NOTION_DB_ID = process.env.NOTION_DB_ID || '';
-
 module.exports = async (req, res) => {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
+
+  const NOTION_TOKEN = process.env.NOTION_TOKEN || '';
+  const NOTION_DB_ID = process.env.NOTION_DB_ID || '';
 
   if (!NOTION_TOKEN || !NOTION_DB_ID) {
     return res.status(503).json({ error: 'Notion not configured' });
   }
 
   const record = req.body;
-  const notionBody = buildNotionPage(record);
+  if (!record || typeof record !== 'object') {
+    return res.status(400).json({ error: 'Invalid request body' });
+  }
+
+  const notionBody = buildNotionPage(record, NOTION_DB_ID);
 
   try {
-    const result = await postToNotion(notionBody);
+    const result = await postToNotion(notionBody, NOTION_TOKEN);
+    if (result.status >= 400) {
+      console.error('[notion] API error', result.status, JSON.stringify(result.data));
+    }
     return res.status(result.status).json(result.data);
   } catch (e) {
+    console.error('[notion] Request failed:', e.message);
     return res.status(502).json({ error: e.message });
   }
 };
 
 // ── Notion page builder ──────────────────────────────────────────────────────
 
-function buildNotionPage(record) {
+function buildNotionPage(record, dbId) {
   const d   = new Date(record.date);
   const pad = n => String(n).padStart(2, '0');
   const datetimeStr = `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
@@ -42,8 +50,11 @@ function buildNotionPage(record) {
     return `${p.name}${hostTag}：${sign}$${fmt(Math.abs(p.pnl))}`;
   });
 
+  // Notion accepts DB ID with or without dashes; strip to be safe
+  const cleanDbId = dbId.replace(/-/g, '');
+
   return {
-    parent: { database_id: NOTION_DB_ID },
+    parent: { database_id: cleanDbId },
     properties: {
       title: { title: [{ type: 'text', text: { content: title } }] },
     },
@@ -69,7 +80,7 @@ function fmt(n) {
 
 // ── Notion API request ───────────────────────────────────────────────────────
 
-function postToNotion(body) {
+function postToNotion(body, token) {
   return new Promise((resolve, reject) => {
     const data = JSON.stringify(body);
     const req  = https.request({
@@ -77,7 +88,7 @@ function postToNotion(body) {
       path:     '/v1/pages',
       method:   'POST',
       headers: {
-        'Authorization':  `Bearer ${NOTION_TOKEN}`,
+        'Authorization':  `Bearer ${token}`,
         'Content-Type':   'application/json',
         'Content-Length': Buffer.byteLength(data),
         'Notion-Version': '2022-06-28',
