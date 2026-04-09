@@ -26,10 +26,12 @@ module.exports = async (req, res) => {
 // ── Notion page builder ──────────────────────────────────────────────────────
 
 function buildNotionPage(record) {
-  const d   = new Date(record.date);
-  const pad = n => String(n).padStart(2, '0');
-  const datetimeStr = `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const title       = `第 ${record.session} 場　${datetimeStr}`;
+  const datetimeStr = record.dateStr || (() => {
+    const d   = new Date(record.date);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  })();
+  const title = `第 ${record.session} 場　${datetimeStr}`;
 
   const dongInfo = record.dong
     ? `東錢：$${fmt(record.dong)}　將數：${record.rounds}　東錢合計：$${fmt(record.dongTotal || record.dong * record.rounds)}`
@@ -86,8 +88,9 @@ function postToNotion(body) {
       let raw = '';
       res.on('data', chunk => raw += chunk);
       res.on('end', () => {
-        try { resolve({ status: res.statusCode, data: JSON.parse(raw) }); }
-        catch (e) { reject(e); }
+        let data;
+        try { data = JSON.parse(raw); } catch { data = { raw }; }
+        resolve({ status: res.statusCode, data });
       });
     });
     req.on('error', reject);
