@@ -993,7 +993,7 @@
     row.innerHTML = `
       <span class="modal-player-name" style="color:var(--gold)">東家（場主）</span>
       <span class="modal-player-chips">—</span>
-      <span class="modal-player-pnl positive">+${hostPnl.toLocaleString()}</span>
+      <span class="modal-player-pnl positive">${formatPnl(hostPnl)}</span>
     `;
     playersEl.appendChild(row);
   }
@@ -1136,6 +1136,12 @@
               <span class="record-player-pnl ${pnlClass(p.pnl)}">${formatPnl(p.pnl)}</span>
             </div>
           `).join('')}
+          ${rec.dong > 0 ? `
+            <div class="record-player-row">
+              <span class="record-player-name" style="color:var(--gold-dim)">東家收入</span>
+              <span class="record-player-pnl positive">${formatPnl(rec.dongTotal || rec.dong * (rec.rounds || 1))}</span>
+            </div>
+          ` : ''}
         </div>
       `;
       list.appendChild(card);
