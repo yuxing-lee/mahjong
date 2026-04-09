@@ -82,10 +82,12 @@ function json(obj, status = 200) {
 }
 
 function buildNotionPage(record, dbId) {
-  const d   = new Date(record.date);
-  const pad = n => String(n).padStart(2, '0');
-  const datetimeStr = `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-  const title       = `第 ${record.session} 場　${datetimeStr}`;
+  const datetimeStr = record.dateStr || (() => {
+    const d   = new Date(record.date);
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${pad(d.getMonth()+1)}/${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  })();
+  const title = `第 ${record.session} 場　${datetimeStr}`;
 
   const dongInfo = record.dong
     ? `東錢：$${fmt(record.dong)}　將數：${record.rounds}　東錢合計：$${fmt(record.dongTotal || record.dong * record.rounds)}`

@@ -1023,6 +1023,7 @@
       });
     }
 
+    const _pad = n => String(n).padStart(2, '0');
     const record = {
       id:        now.getTime(),
       session:   session,
@@ -1031,6 +1032,7 @@
       rounds:    rounds,
       dongTotal: dongTotal(),
       date:      now.toISOString(),
+      dateStr:   `${now.getFullYear()}/${_pad(now.getMonth()+1)}/${_pad(now.getDate())} ${_pad(now.getHours())}:${_pad(now.getMinutes())}`,
       players:   players,
     };
 
@@ -1070,8 +1072,16 @@
       } else {
         const err = await res.json().catch(() => ({}));
         if (err.error === 'Notion not configured') return; // 未設定環境變數時靜默
-        showToast('Notion 同步失敗', 'error');
-        console.error('Notion error:', err);
+        if (res.status === 401 || res.status === 403) {
+          showToast('Notion 授權失敗，請確認 Token 及資料庫權限', 'error');
+        } else if (res.status === 404) {
+          showToast('Notion 資料庫不存在，請確認 DB ID', 'error');
+        } else if (res.status === 400) {
+          showToast('Notion 同步失敗：請求格式錯誤', 'error');
+        } else {
+          showToast('Notion 同步失敗', 'error');
+        }
+        console.error('Notion sync error', res.status, err);
       }
     } catch {
       // 非 Vercel 環境（本機直開 HTML）時靜默
