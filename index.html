@@ -508,6 +508,81 @@
     .record-player-name { color: var(--text-dim); }
     .record-player-pnl  { font-family: 'DM Mono', monospace; }
 
+    /* ── Notion settings ── */
+    .notion-settings {
+      margin-top: 24px;
+      border-top: 1px solid var(--border);
+      padding-top: 16px;
+    }
+    .notion-settings-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      user-select: none;
+    }
+    .notion-settings-toggle-label {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.7rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .notion-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .notion-dot.on  { background: var(--green); }
+    .notion-dot.off { background: var(--muted); }
+    .notion-chevron {
+      color: var(--muted);
+      font-size: 0.7rem;
+      transition: transform 0.2s;
+    }
+    .notion-chevron.open { transform: rotate(180deg); }
+    .notion-settings-body {
+      display: none;
+      margin-top: 14px;
+    }
+    .notion-settings-body.open { display: block; }
+    .notion-field-label {
+      font-size: 0.72rem;
+      color: var(--text-dim);
+      margin-bottom: 6px;
+    }
+    .notion-input {
+      width: 100%;
+      padding: 10px 12px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: 'DM Mono', monospace;
+      font-size: 0.78rem;
+      outline: none;
+      transition: border-color 0.15s;
+      margin-bottom: 10px;
+    }
+    .notion-input:focus { border-color: var(--gold-dim); }
+    .notion-save-btn {
+      width: 100%;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--gold-dim);
+      background: rgba(201,168,76,0.1);
+      color: var(--gold);
+      font-family: 'Noto Serif TC', serif;
+      font-size: 0.85rem;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+    .notion-save-btn:hover { opacity: 0.8; }
+
     /* ── Toast ── */
     .toast {
       position: fixed;
@@ -614,6 +689,23 @@
     <div id="historyList"></div>
   </div>
 
+  <!-- Notion 設定 -->
+  <div class="notion-settings">
+    <div class="notion-settings-toggle" onclick="toggleNotionSettings()">
+      <span class="notion-settings-toggle-label">
+        <span class="notion-dot" id="notionDot"></span>
+        Notion 同步
+      </span>
+      <span class="notion-chevron" id="notionChevron">▾</span>
+    </div>
+    <div class="notion-settings-body" id="notionSettingsBody">
+      <div class="notion-field-label">Cloudflare Worker 網址</div>
+      <input class="notion-input" id="notionWorkerUrl"
+             type="url" placeholder="https://xxx.workers.dev" />
+      <button class="notion-save-btn" onclick="saveNotionSettings()">儲存</button>
+    </div>
+  </div>
+
 </div>
 
 <!-- Toast -->
@@ -658,6 +750,7 @@
   renderFreqPlayers();
   renderPlayerRows();
   renderHistory();
+  initNotionSettings();
 
   // ── Frequent players ──
   function renderFreqPlayers() {
@@ -1057,9 +1150,40 @@
   }
 
   // ── Notion ──
+  let notionWorkerUrl = localStorage.getItem('notion_worker_url') || '';
+
+  function initNotionSettings() {
+    const input = document.getElementById('notionWorkerUrl');
+    if (input && notionWorkerUrl) input.value = notionWorkerUrl;
+    updateNotionDot();
+  }
+
+  function updateNotionDot() {
+    const dot = document.getElementById('notionDot');
+    if (!dot) return;
+    dot.className = 'notion-dot ' + (notionWorkerUrl ? 'on' : 'off');
+  }
+
+  function toggleNotionSettings() {
+    const body    = document.getElementById('notionSettingsBody');
+    const chevron = document.getElementById('notionChevron');
+    if (!body) return;
+    const open = body.classList.toggle('open');
+    if (chevron) chevron.classList.toggle('open', open);
+  }
+
+  function saveNotionSettings() {
+    const input = document.getElementById('notionWorkerUrl');
+    notionWorkerUrl = (input ? input.value.trim() : '');
+    localStorage.setItem('notion_worker_url', notionWorkerUrl);
+    updateNotionDot();
+    showToast(notionWorkerUrl ? '設定已儲存' : '已清除 Notion 設定', 'success');
+  }
+
   async function notifyNotion(record) {
+    if (!notionWorkerUrl) return;
     try {
-      const res = await fetch('/api/notion/record', {
+      const res = await fetch(notionWorkerUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(record)
@@ -1068,12 +1192,12 @@
         showToast('已同步至 Notion', 'success');
       } else {
         const err = await res.json().catch(() => ({}));
-        if (err.error === 'Notion not configured on server') return; // silent — server not set up
         showToast('Notion 同步失敗', 'error');
         console.error('Notion error:', err);
       }
     } catch (e) {
-      // fetch failed (e.g. opened as file:// without server) — silent
+      showToast('Notion 同步失敗', 'error');
+      console.error('Notion fetch error:', e);
     }
   }
 
