@@ -439,6 +439,57 @@
       color: var(--muted);
       margin-bottom: 12px;
     }
+    .history-tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 14px;
+      align-items: center;
+    }
+    .history-tab {
+      font-size: 0.78rem;
+      padding: 5px 14px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: 'Noto Serif TC', serif;
+      transition: all 0.15s;
+    }
+    .history-tab.active {
+      background: rgba(201,168,76,0.12);
+      border-color: rgba(201,168,76,0.4);
+      color: var(--gold);
+    }
+    .history-tab:hover:not(.active) { color: var(--text-dim); }
+    .notion-refresh-btn {
+      margin-left: auto;
+      font-size: 0.72rem;
+      padding: 4px 10px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--muted);
+      cursor: pointer;
+      font-family: 'DM Mono', monospace;
+      transition: all 0.15s;
+    }
+    .notion-refresh-btn:hover { color: var(--text); border-color: var(--text-dim); }
+    .notion-refresh-btn:disabled { opacity: 0.4; cursor: default; }
+    .notion-player-lines {
+      font-size: 0.82rem;
+      color: var(--text-dim);
+      font-family: 'DM Mono', monospace;
+      line-height: 1.7;
+      padding: 4px 0;
+      white-space: pre-line;
+    }
+    .record-date {
+      font-size: 0.75rem;
+      color: var(--muted);
+      margin-bottom: 8px;
+      font-family: 'DM Mono', monospace;
+    }
     .history-empty {
       font-size: 0.85rem;
       color: var(--muted);
@@ -611,7 +662,13 @@
   <!-- 歷史紀錄 -->
   <div class="history-section">
     <div class="history-title">歷史紀錄</div>
+    <div class="history-tabs">
+      <button class="history-tab active" id="tabLocal" onclick="switchTab('local')">本機</button>
+      <button class="history-tab" id="tabNotion" onclick="switchTab('notion')">Notion</button>
+      <button class="notion-refresh-btn" id="notionRefreshBtn" style="display:none;" onclick="loadNotionRecords()">↻ 重新載入</button>
+    </div>
     <div id="historyList"></div>
+    <div id="notionList" style="display:none;"></div>
   </div>
 
 
@@ -1057,6 +1114,79 @@
     closeModal();
     updateSessionLabel();
     renderHistory();
+  }
+
+  // ── History tabs ──
+  let currentTab = 'local';
+  let _notionAbort = null;
+
+  function switchTab(tab) {
+    if (currentTab === tab) return;
+    currentTab = tab;
+    document.getElementById('tabLocal').classList.toggle('active', tab === 'local');
+    document.getElementById('tabNotion').classList.toggle('active', tab === 'notion');
+    document.getElementById('historyList').style.display = tab === 'local' ? '' : 'none';
+    document.getElementById('notionList').style.display = tab === 'notion' ? '' : 'none';
+    document.getElementById('notionRefreshBtn').style.display = tab === 'notion' ? '' : 'none';
+    if (tab === 'notion') loadNotionRecords();
+  }
+
+  async function loadNotionRecords() {
+    if (_notionAbort) _notionAbort.abort();
+    _notionAbort = new AbortController();
+    const list = document.getElementById('notionList');
+    const btn  = document.getElementById('notionRefreshBtn');
+    list.innerHTML = '<div class="history-empty">載入中…</div>';
+    btn.disabled = true;
+    try {
+      const res = await fetch('/api/notion', { signal: _notionAbort.signal });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        list.innerHTML = `<div class="history-empty" style="color:var(--red)">載入失敗：${escHtml(err.error || res.status)}</div>`;
+        return;
+      }
+      const notionRecords = await res.json();
+      renderNotionHistory(notionRecords);
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        list.innerHTML = '<div class="history-empty" style="color:var(--red)">無法連線到伺服器</div>';
+      }
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  function renderNotionHistory(notionRecords) {
+    const list = document.getElementById('notionList');
+    if (!notionRecords.length) {
+      list.innerHTML = '<div class="history-empty">Notion 尚無紀錄</div>';
+      return;
+    }
+    list.innerHTML = '';
+    notionRecords.forEach(rec => {
+      const card = document.createElement('div');
+      card.className = 'record-card';
+
+      const title = rec.title || `第 ${rec.session} 場`;
+      const dongTag = rec.dong
+        ? `<span class="record-bottom-tag">東 $${rec.dongTotal.toLocaleString()}</span>`
+        : '';
+
+      card.innerHTML = `
+        <div class="record-header" onclick="toggleRecord(this)">
+          <span class="record-title">${escHtml(title)}</span>
+          <div class="record-meta">
+            <span class="record-bottom-tag">底 $${rec.bottom.toLocaleString()}</span>
+            ${dongTag}
+          </div>
+        </div>
+        <div class="record-body">
+          ${rec.date ? `<div class="record-date">${escHtml(rec.date)}</div>` : ''}
+          <div class="notion-player-lines">${escHtml(rec.playersText)}</div>
+        </div>
+      `;
+      list.appendChild(card);
+    });
   }
 
   // ── Notion ──
