@@ -119,6 +119,11 @@
   .tsum div { border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; font-size: 13px; }
   .tsum .ok { color: var(--lose); } .tsum .bad { color: var(--warn); font-weight: 700; }
   .split .inline { margin-top: 10px; }
+  .partrow { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px 12px; font-size: 13px; color: var(--muted); }
+  .partrow input { width: 96px; height: 34px; border-radius: 8px; border: 1px solid var(--line); padding: 0 8px;
+    font: 600 15px var(--mono); text-align: right; background: #fff; color: var(--ink); }
+  .partrow .pm { width: 34px; height: 34px; border-radius: 8px; border: 1px solid var(--line); background: #fff; font: 700 16px var(--mono); color: var(--ink); }
+  .partrow b { color: var(--ink); min-width: 56px; }
 
   /* 分析 */
   .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
@@ -859,7 +864,11 @@ function findSplits(scores, max = Infinity) {
   return out.sort((x, y) => x.score - y.score).slice(0, max).map((c) => ({ ...c, house }));
 }
 
-/** 拆桌面板：scores 是 {player_id, name, points}[]；確認後呼叫 opts.onConfirm(各桌的分數) */
+/**
+ * 拆桌面板：scores 是 {player_id, name, points}[]；確認後呼叫 opts.onConfirm(各桌的分數)
+ * 每個人可以選「桌1／桌2／兩桌」。選「兩桌」（例如中途換桌、打了兩邊）時，
+ * 輸入他在桌 1 的分數，桌 2 自動補成原本總分減掉桌 1。
+ */
 function openSplit(host, scores, opts) {
   const houses = scores.filter((s) => isHouse(s.player_id));
   const house = houses.length === 1 ? houses[0] : null;
@@ -867,6 +876,7 @@ function openSplit(host, scores, opts) {
   const all = findSplits(scores);
   const cands = all.slice(0, 6);
   const assign = new Map(others.map((s, i) => [s.player_id, i < Math.ceil(others.length / 2) ? 0 : 1]));
+  const part1 = new Map(); // 選「兩桌」的人在桌 1 的分數
   let picked = -1;
 
   const box = document.createElement("div");
@@ -881,17 +891,43 @@ function openSplit(host, scores, opts) {
     draw();
   };
 
+  /** 依目前分配，算出兩桌各自的分數（台費帳戶依兩桌輸贏補齊） */
   function tables() {
     const t = [[], []];
-    for (const s of others) t[assign.get(s.player_id)].push({ player_id: s.player_id, points: s.points, name: s.name });
+    for (const s of others) {
+      const a = assign.get(s.player_id);
+      if (a === 2) {
+        const x = part1.get(s.player_id) ?? 0;
+        t[0].push({ player_id: s.player_id, points: x, name: s.name, part: true });
+        t[1].push({ player_id: s.player_id, points: s.points - x, name: s.name, part: true });
+      } else {
+        t[a].push({ player_id: s.player_id, points: s.points, name: s.name });
+      }
+    }
     const shares = t.map((rows) => -rows.reduce((a, e) => a + e.points, 0));
     if (house) shares.forEach((h, i) => { if (h !== 0) t[i].push({ player_id: house.player_id, points: h, name: house.name }); });
     return { t, shares };
   }
 
+  /** 剛切成「兩桌」時的預設：沒有台費帳戶 → 讓桌 1 剛好平衡；有 → 讓兩桌台費一樣（取 50 的倍數） */
+  function defaultPart(pid) {
+    const me = others.find((s) => s.player_id === pid);
+    let sA = 0, sB = 0;
+    for (const s of others) {
+      if (s.player_id === pid) continue;
+      const a = assign.get(s.player_id);
+      if (a === 0) sA += s.points;
+      else if (a === 1) sB += s.points;
+      else { const x = part1.get(s.player_id) ?? 0; sA += x; sB += s.points - x; }
+    }
+    if (!house) return -sA;
+    return Math.round((sB + me.points - sA) / 2 / 50) * 50;
+  }
+
   function problems({ t, shares }) {
     const msgs = [];
     t.forEach((rows, i) => { if (rows.length < 2) msgs.push(`桌 ${i + 1} 人數不夠`); });
+    for (const s of others) if (assign.get(s.player_id) === 2 && !Number.isInteger(part1.get(s.player_id))) msgs.push(`請輸入${s.name}在桌 1 的分數`);
     if (house) {
       shares.forEach((h, i) => { if (h * house.points < 0) msgs.push(`桌 ${i + 1} 的${house.name}會變成 ${signed(h)}`); });
     } else {
@@ -900,47 +936,86 @@ function openSplit(host, scores, opts) {
     return msgs;
   }
 
-  function draw() {
+  const names = (rows) => rows.filter((e) => !house || e.player_id !== house.player_id)
+    .map((e) => esc(e.name) + (e.part ? `(${signed(e.points)})` : "")).join("、");
+
+  /** 只更新下方的兩桌摘要和按鈕（輸入分數時不重畫整個面板，避免鍵盤收起來） */
+  function drawStatus() {
     const cur = tables(), errs = problems(cur);
-    const names = (rows) => rows.filter((e) => !house || e.player_id !== house.player_id).map((e) => esc(e.name)).join("、");
+    box.querySelector(".tsum").innerHTML = cur.t.map((rows, i) => `<div>
+        <b>桌 ${i + 1}</b>　${rows.filter((e) => !house || e.player_id !== house.player_id).length} 人<br>
+        <span class="muted">${names(rows) || "—"}</span>
+        ${house ? `<br>${esc(house.name)}：<b class="num">${signed(cur.shares[i])}</b>` : `<br>總和：<b class="num">${signed(-cur.shares[i])}</b>`}
+      </div>`).join("");
+    const hint = box.querySelector(".splithint");
+    hint.style.display = errs.length ? "block" : "none";
+    hint.textContent = errs.join("；");
+    box.querySelector('[data-act="ok"]').disabled = errs.length > 0;
+    for (const s of others) {
+      const out = box.querySelector(`.part2[data-pid="${s.player_id}"]`);
+      if (out) out.textContent = signed(s.points - (part1.get(s.player_id) ?? 0));
+    }
+  }
+
+  function draw() {
     box.innerHTML = `
       <div class="muted">${cands.length
         ? `找到 ${all.length} 種兩桌都對得上的分法${all.length > cands.length ? `，列出最可能的 ${cands.length} 種` : ""}${house ? `（「${esc(house.name)}」的台費依兩桌輸贏自動分配）` : ""}。數字只能確定總和，請選實際上的那一種，或在下面手動調整。`
-        : `找不到兩桌都剛好對得上的分法，請在下面手動調整。`}</div>
+        : `找不到兩桌都剛好對得上的分法，請在下面手動調整。`}
+        有人兩桌都打過（例如中途換桌），把他選成「兩桌」，再填他在桌 1 的分數。</div>
       ${cands.length ? `<h4>建議的分法</h4><div class="cands">${cands.map((c, i) => `
         <button class="cand ${i === picked ? "on" : ""}" data-i="${i}">
           <b>桌 1</b>：${c.A.map((s) => esc(s.name)).join("、")}${house ? `（${esc(house.name)} ${signed(c.hA)}）` : ""}<br>
           <b>桌 2</b>：${c.B.map((s) => esc(s.name)).join("、")}${house ? `（${esc(house.name)} ${signed(c.hB)}）` : ""}
         </button>`).join("")}</div>` : ""}
       <h4>每個人在哪一桌</h4>
-      <div class="assign">${others.map((s) => `
+      <div class="assign">${others.map((s) => {
+        const a = assign.get(s.player_id);
+        return `
         <div class="arow"><span>${esc(s.name)}</span><b class="num ${cls(s.points)}">${signed(s.points)}</b>
           <span class="seg" data-pid="${s.player_id}">
-            <button class="${assign.get(s.player_id) === 0 ? "on" : ""}" data-t="0">桌1</button><button class="${assign.get(s.player_id) === 1 ? "on" : ""}" data-t="1">桌2</button>
-          </span></div>`).join("")}</div>
-      <div class="tsum">${cur.t.map((rows, i) => `<div>
-        <b>桌 ${i + 1}</b>　${rows.filter((e) => !house || e.player_id !== house.player_id).length} 人<br>
-        <span class="muted">${names(rows) || "—"}</span>
-        ${house ? `<br>${esc(house.name)}：<b class="num">${signed(cur.shares[i])}</b>` : `<br>總和：<b class="num">${signed(-cur.shares[i])}</b>`}
-      </div>`).join("")}</div>
-      ${errs.length ? `<div class="datehint" style="display:block">${errs.map(esc).join("；")}</div>` : ""}
+            <button class="${a === 0 ? "on" : ""}" data-t="0">桌1</button><button class="${a === 1 ? "on" : ""}" data-t="1">桌2</button><button class="${a === 2 ? "on" : ""}" data-t="2">兩桌</button>
+          </span></div>
+        ${a === 2 ? `<div class="partrow">
+          <span>桌 1</span>
+          <button class="pm" data-pid="${s.player_id}" type="button" aria-label="切換正負">±</button>
+          <input class="partin" data-pid="${s.player_id}" inputmode="numeric" value="${part1.get(s.player_id) ?? ""}" placeholder="0" aria-label="${esc(s.name)}在桌 1 的分數">
+          <span>桌 2</span><b class="num part2" data-pid="${s.player_id}"></b>
+        </div>` : ""}`;
+      }).join("")}</div>
+      <div class="tsum"></div>
+      <div class="datehint splithint"></div>
       <div class="inline">
-        <button class="btn small" data-act="ok" ${errs.length ? "disabled" : ""}>${opts.okLabel || "確認拆成兩桌"}</button>
+        <button class="btn small" data-act="ok">${opts.okLabel || "確認拆成兩桌"}</button>
         <button class="btn small ghost" data-act="cancel">取消</button>
       </div>`;
     box.querySelectorAll(".cand").forEach((b) => b.onclick = () => pickCand(Number(b.dataset.i)));
     box.querySelectorAll(".seg button").forEach((b) => b.onclick = () => {
-      assign.set(b.parentElement.dataset.pid, Number(b.dataset.t)); picked = -1; draw();
+      const pid = b.parentElement.dataset.pid, t = Number(b.dataset.t);
+      if (t === 2 && assign.get(pid) !== 2) { assign.set(pid, 2); part1.set(pid, defaultPart(pid)); }
+      else assign.set(pid, t);
+      picked = -1; draw();
+    });
+    box.querySelectorAll(".partin").forEach((inp) => inp.oninput = () => {
+      const v = inp.value.replace(/[^\d-]/g, "").replace(/(?!^)-/g, "");
+      inp.value = v;
+      part1.set(inp.dataset.pid, v === "" || v === "-" ? NaN : parseInt(v, 10));
+      drawStatus();
+    });
+    box.querySelectorAll(".pm").forEach((b) => b.onclick = () => {
+      const pid = b.dataset.pid, x = part1.get(pid);
+      if (Number.isInteger(x)) { part1.set(pid, -x); box.querySelector(`.partin[data-pid="${pid}"]`).value = String(-x); drawStatus(); }
     });
     box.querySelector('[data-act="cancel"]').onclick = () => box.remove();
     box.querySelector('[data-act="ok"]').onclick = async () => {
       const { t } = tables();
       const payload = t.map((rows) => rows.map(({ player_id, points }) => ({ player_id, points })));
-      if (!confirm(opts.confirmText(names(t[0]), names(t[1])))) return;
+      if (!confirm(opts.confirmText(names(t[0]).replace(/<[^>]+>/g, ""), names(t[1]).replace(/<[^>]+>/g, "")))) return;
       const ok = box.querySelector('[data-act="ok"]'); ok.disabled = true;
       try { await opts.onConfirm(payload); box.remove(); await load(); }
       catch (e) { toast(e.message); ok.disabled = false; }
     };
+    drawStatus();
   }
 
   if (cands.length) pickCand(0); else draw();

@@ -129,10 +129,15 @@ Deno.test("拆桌檢查", () => {
   const t1b = t1.map((e) => e.player_id === "h" ? { ...e, points: 150 } : e);
   assertEquals(validateSplit(orig, [t1b, t2], H)?.includes("總和"), true);
   // 有人沒分到
-  assertEquals(validateSplit(orig, [t1, t2.filter((e) => e.player_id !== "i").map((e) => e.player_id === "h" ? { ...e, points: 50 } : e)], H), "每位玩家要剛好分到一桌");
+  assertEquals(validateSplit(orig, [t1, t2.filter((e) => e.player_id !== "i").map((e) => e.player_id === "h" ? { ...e, points: 50 } : e)], H), "每位玩家至少要分到一桌");
   // 改了玩家分數
   const t2c = t2.map((e) => e.player_id === "e" ? { ...e, points: 250 } : e.player_id === "f" ? { ...e, points: -150 } : e);
-  assertEquals(validateSplit(orig, [t1, t2c], H), "玩家的分數不能改");
-  // 沒有台費帳戶時台費也不能拆
-  assertEquals(validateSplit(orig, [t1, t2], new Set()), "每位玩家要剛好分到一桌");
+  assertEquals(validateSplit(orig, [t1, t2c], H), "同一個人在各桌的分數加起來，要和原本一樣");
+  // 中途換桌：a 的 +300 拆成 桌1 +250、桌2 +50
+  const t2ok = [{ player_id: "e", points: 200 }, { player_id: "f", points: -100 }, { player_id: "g", points: -150 }, { player_id: "i", points: -50 }, { player_id: "a", points: 50 }, { player_id: "h", points: 50 }];
+  const t1ok = [{ player_id: "a", points: 250 }, { player_id: "b", points: -200 }, { player_id: "c", points: -100 }, { player_id: "d", points: -100 }, { player_id: "h", points: 150 }];
+  assertEquals(validateSplit(orig, [t1ok, t2ok], H), null);
+  // 換桌的人兩邊加起來不對
+  const t2bad = t2ok.map((e) => e.player_id === "a" ? { ...e, points: 100 } : e.player_id === "h" ? { ...e, points: 0 } : e);
+  assertEquals(validateSplit(orig, [t1ok, t2bad], H), "同一個人在各桌的分數加起來，要和原本一樣");
 });

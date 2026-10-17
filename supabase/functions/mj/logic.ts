@@ -293,8 +293,8 @@ export type Entry = { player_id: string; points: number };
 /**
  * 檢查「把一場拆成多桌」是否對得上原本的紀錄。對的話回傳 null，否則回傳錯誤訊息。
  * - 每桌至少 2 人、總和為 0、同一桌不能重複
- * - 一般玩家：剛好出現在一桌，分數和原本相同
- * - 台費帳戶：可以分到多桌，但各桌加起來要等於原本的數字
+ * - 每個人可以只在一桌，也可以兩桌都有（例如中途換桌），但各桌加起來要等於原本的分數
+ * - 一般玩家至少要分到一桌；台費帳戶原本是 0 的話可以不出現
  */
 export function validateSplit(original: Entry[], tables: Entry[][], houseIds: Set<string>): string | null {
   if (tables.length < 2) return "至少要拆成兩桌";
@@ -319,8 +319,8 @@ export function validateSplit(original: Entry[], tables: Entry[][], houseIds: Se
     if (houseIds.has(pid)) {
       if (s.sum !== pts) return "台費加起來要和原本一樣";
     } else {
-      if (s.count !== 1) return "每位玩家要剛好分到一桌";
-      if (s.sum !== pts) return "玩家的分數不能改";
+      if (s.count < 1) return "每位玩家至少要分到一桌";
+      if (s.sum !== pts) return "同一個人在各桌的分數加起來，要和原本一樣";
     }
   }
   return null;
