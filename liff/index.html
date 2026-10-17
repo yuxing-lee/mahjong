@@ -296,6 +296,12 @@ async function boot() {
     await liff.init({ liffId: LIFF_ID });
     if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
     idToken = liff.getIDToken();
+    if (!idToken) throw new Error("拿不到 LINE 登入資訊：請在 LIFF 設定的 Scopes 勾選 openid");
+    // 外部瀏覽器可能留著過期的 token，重新登入一次
+    const exp = (liff.getDecodedIDToken() || {}).exp || 0;
+    if (exp * 1000 < Date.now() + 60e3 && !liff.isInClient()) {
+      liff.logout(); liff.login({ redirectUri: location.href }); return;
+    }
     roomCode = readRoomCode();
     if (!roomCode) throw new Error("連結缺少房號，請從群組裡的「開啟記分頁」按鈕進入");
     await load();

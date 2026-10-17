@@ -89,7 +89,15 @@ async function verifyIdToken(req: Request): Promise<{ userId: string }> {
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ id_token: token, client_id: env("LINE_LOGIN_CHANNEL_ID") }),
   });
-  if (!res.ok) throw new HttpError(401, "登入已過期，請重新開啟頁面");
+  if (!res.ok) {
+    // 常見：IdToken expired.（過期）、Invalid IdToken Audience.（LINE_LOGIN_CHANNEL_ID 設錯）
+    const detail = await res.json().catch(() => ({}));
+    const reason = String(detail.error_description ?? detail.error ?? res.status);
+    console.error("LINE id_token verify failed:", reason);
+    if (/expired/i.test(reason)) throw new HttpError(401, "登入已過期，請關掉頁面重新開啟");
+    if (/audience/i.test(reason)) throw new HttpError(401, "LINE Login Channel ID 設定不符，請檢查 LINE_LOGIN_CHANNEL_ID");
+    throw new HttpError(401, `LINE 登入驗證失敗：${reason}`);
+  }
   const info = await res.json();
   return { userId: info.sub };
 }
