@@ -97,5 +97,14 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   const saved = JSON.parse(await Deno.readTextFile(dataFile));
   eq(saved.rooms.length, 1);
   eq(saved.games.length, 2);
+
+  // 刪房：非管理員不行、要二次確認、刪完可以重開
+  ok((await say(OTHER, "/刪房 確認")).includes("只有管理員"));
+  ok((await say(ADMIN, "/刪房")).includes("確定要刪除房間「週五麻將」"));
+  ok((await say(ADMIN, "/刪房 確認")).includes("已刪除房間"));
+  ok((await say(ADMIN, "/戰績")).includes("還沒有房間"));
+  const after = JSON.parse(await Deno.readTextFile(dataFile));
+  eq([after.rooms.length, after.players.length, after.games.length, after.scores.length], [0, 0, 0, 0]);
+  ok((await say(ADMIN, "/開房 新房")).includes("已建立房間「新房」"));
   console.log = origLog;
 });

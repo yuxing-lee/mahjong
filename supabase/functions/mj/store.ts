@@ -14,6 +14,8 @@ export interface Store {
   roomByCode(code: string): Promise<Room | null>;
   createRoom(r: Omit<Room, "id">): Promise<Room>;
   unlinkGroup(groupId: string): Promise<void>;
+  /** 刪除房間和裡面所有玩家、對局 */
+  deleteRoom(roomId: string): Promise<void>;
 
   playersOf(roomId: string): Promise<Player[]>;
   /** 插入不存在的名字，回傳實際新增的名字 */

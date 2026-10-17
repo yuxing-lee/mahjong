@@ -36,6 +36,12 @@ export class SupabaseStore implements Store {
     if (error) throw error;
   }
 
+  async deleteRoom(roomId: string) {
+    // players / games / scores 都設了 on delete cascade，會一起刪掉
+    const { error } = await this.db.from("rooms").delete().eq("id", roomId);
+    if (error) throw error;
+  }
+
   async playersOf(roomId: string) {
     const { data, error } = await this.db.from("players")
       .select("id,name,line_user_id").eq("room_id", roomId).order("created_at");

@@ -66,6 +66,16 @@ export class FileStore implements Store {
     }, true);
   }
 
+  deleteRoom(roomId: string) {
+    return this.run(() => {
+      const gameIds = new Set(this.data.games.filter((g) => g.room_id === roomId).map((g) => g.id));
+      this.data.scores = this.data.scores.filter((s) => !gameIds.has(s.game_id));
+      this.data.games = this.data.games.filter((g) => g.room_id !== roomId);
+      this.data.players = this.data.players.filter((p) => p.room_id !== roomId);
+      this.data.rooms = this.data.rooms.filter((r) => r.id !== roomId);
+    }, true);
+  }
+
   playersOf(roomId: string) {
     return this.run(() =>
       this.data.players.filter((p) => p.room_id === roomId)

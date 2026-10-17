@@ -74,10 +74,10 @@ const quickReply = {
   })),
 };
 
-const reply = (replyToken: string, messages: Message[]) => {
+const reply = (replyToken: string, messages: Message[], withQuickReply = true) => {
   const msgs = messages.slice(0, 5);
   // 只掛在最後一則訊息上（LINE 只看最後一則的 quickReply）
-  if (msgs.length) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], quickReply };
+  if (msgs.length && withQuickReply) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], quickReply };
   return lineCall("reply", { replyToken, messages: msgs });
 };
 const push = (to: string, messages: Message[]) =>
@@ -168,10 +168,11 @@ const HELP = [
   "/戰績　看排行榜",
   "/最近　看最近 5 場",
   "/撤銷　刪掉最後一場（管理員）",
+  "/刪房　刪除這個房間和所有紀錄（管理員）",
   "/記分頁　開啟記分頁面",
   "",
   "＊輸入框上方的按鈕點了就會送出指令",
-  "＊加人、記分、撤銷只有管理員能操作",
+  "＊加人、記分、撤銷、刪房只有管理員能操作",
   "＊分數只作為遊戲紀錄，不具任何金錢價值",
 ].join("\n");
 
@@ -242,7 +243,7 @@ async function handleEvent(ev: any) {
       }
     }
 
-    if (["/加人", "/記", "/撤銷"].includes(cmd) && !isAdmin) {
+    if (["/加人", "/記", "/撤銷", "/刪房"].includes(cmd) && !isAdmin) {
       return void await r([text("只有管理員可以操作這個指令。")]);
     }
 
@@ -273,6 +274,21 @@ async function handleEvent(ev: any) {
       case "/撤銷": {
         const ok = await store.deleteLastGame(room.id);
         return void await r([text(ok ? "↩️ 已刪除最後一場。" : "沒有可以撤銷的對局。")]);
+      }
+
+      case "/刪房": {
+        if (args.trim() !== "確認") {
+          const { games } = await store.gamesOf(room.id);
+          return void await reply(ev.replyToken, [{
+            ...text(`⚠️ 確定要刪除房間「${room.name}」嗎？\n所有玩家和 ${games.length} 場紀錄都會一起刪除，無法復原。\n\n確定的話請輸入：/刪房 確認`),
+            quickReply: { items: [
+              { type: "action", action: { type: "message", label: "確認刪除", text: "/刪房 確認" } },
+              { type: "action", action: { type: "message", label: "取消", text: "/戰績" } },
+            ] },
+          }], false);
+        }
+        await store.deleteRoom(room.id);
+        return void await reply(ev.replyToken, [text(`🗑️ 已刪除房間「${room.name}」。\n要重新開始請輸入：/開房 房間名稱`)], false);
       }
     }
 
