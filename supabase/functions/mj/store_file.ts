@@ -174,6 +174,25 @@ export class FileStore implements Store {
     }, true);
   }
 
+  splitGame(roomId: string, gameId: string, tables: { player_id: string; points: number }[][]) {
+    return this.run(() => {
+      const g = this.data.games.find((x) => x.id === gameId && x.room_id === roomId);
+      if (!g) throw new UserError("找不到這一場");
+      const base = new Date(g.played_at).getTime();
+      tables.forEach((t, i) => {
+        const id = crypto.randomUUID();
+        this.data.games.push({
+          id, room_id: roomId, created_by: g.created_by,
+          note: [g.note, `第${i + 1}桌`].filter(Boolean).join("・"),
+          played_at: new Date(base + i).toISOString(),
+        });
+        for (const e of t) this.data.scores.push({ game_id: id, player_id: e.player_id, points: e.points });
+      });
+      this.data.games = this.data.games.filter((x) => x.id !== gameId);
+      this.data.scores = this.data.scores.filter((s) => s.game_id !== gameId);
+    }, true);
+  }
+
   deleteLastGame(roomId: string) {
     return this.run(() => {
       const last = this.data.games.filter((g) => g.room_id === roomId)

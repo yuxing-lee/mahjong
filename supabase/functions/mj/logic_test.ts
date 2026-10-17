@@ -111,3 +111,28 @@ Deno.test("台費帳戶不列入分析", () => {
   assertEquals(r.games, 2); // 自己的場次照算
   assertEquals(computeAnalysis("d", players, games, scores), null);
 });
+
+import { validateSplit } from "./logic.ts";
+
+Deno.test("拆桌檢查", () => {
+  const H = new Set(["h"]);
+  const orig = [
+    { player_id: "a", points: 300 }, { player_id: "b", points: -200 }, { player_id: "c", points: -100 }, { player_id: "d", points: -100 },
+    { player_id: "e", points: 200 }, { player_id: "f", points: -100 }, { player_id: "g", points: -150 }, { player_id: "i", points: -50 },
+    { player_id: "h", points: 200 },
+  ];
+  const t1 = [{ player_id: "a", points: 300 }, { player_id: "b", points: -200 }, { player_id: "c", points: -100 }, { player_id: "d", points: -100 }, { player_id: "h", points: 100 }];
+  const t2 = [{ player_id: "e", points: 200 }, { player_id: "f", points: -100 }, { player_id: "g", points: -150 }, { player_id: "i", points: -50 }, { player_id: "h", points: 100 }];
+  assertEquals(validateSplit(orig, [t1, t2], H), null);
+  assertEquals(validateSplit(orig, [t1], H), "至少要拆成兩桌");
+  // 台費分錯
+  const t1b = t1.map((e) => e.player_id === "h" ? { ...e, points: 150 } : e);
+  assertEquals(validateSplit(orig, [t1b, t2], H)?.includes("總和"), true);
+  // 有人沒分到
+  assertEquals(validateSplit(orig, [t1, t2.filter((e) => e.player_id !== "i").map((e) => e.player_id === "h" ? { ...e, points: 50 } : e)], H), "每位玩家要剛好分到一桌");
+  // 改了玩家分數
+  const t2c = t2.map((e) => e.player_id === "e" ? { ...e, points: 250 } : e.player_id === "f" ? { ...e, points: -150 } : e);
+  assertEquals(validateSplit(orig, [t1, t2c], H), "玩家的分數不能改");
+  // 沒有台費帳戶時台費也不能拆
+  assertEquals(validateSplit(orig, [t1, t2], new Set()), "每位玩家要剛好分到一桌");
+});

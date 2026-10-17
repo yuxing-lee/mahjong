@@ -116,6 +116,34 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq((await api(ADMIN, "game/date", { code, game_id: "nope", played_at: "2026-02-01T00:00:00Z" })).status, 404);
   eq((await api(ADMIN, "game/delete", { code, game_id: backdated.id })).status, 200);
 
+  // 拆兩桌：先記一場「兩桌合在一起」的，再拆開
+  await say(ADMIN, "/加人 甲 乙 丙 丁");
+  await say(ADMIN, "/設台費 阿美");
+  const merged = "/記 小明+300 阿華-200 老王-100 甲-100 乙+200 丙-100 丁-150 阿美+150";
+  ok((await say(ADMIN, merged)).includes("小明 +300"));
+  let rs = (await api(ADMIN, `room?code=${code}`)).body;
+  const mg = rs.recent[0];
+  eq(mg.scores.length, 8);
+  const pid = (n: string) => rs.players.find((p: any) => p.name === n).id;
+  const T = (rows: [string, number][]) => rows.map(([n, points]) => ({ player_id: pid(n), points }));
+  const good = [
+    T([["小明", 300], ["阿華", -200], ["老王", -100], ["甲", -100], ["阿美", 100]]),
+    T([["乙", 200], ["丙", -100], ["丁", -150], ["阿美", 50]]),
+  ];
+  eq((await api(OTHER, "game/split", { code, game_id: mg.id, tables: good })).status, 403);
+  const bad = [good[0], T([["乙", 200], ["丙", -100], ["丁", -100], ["阿美", 0]])];
+  ok(String((await api(ADMIN, "game/split", { code, game_id: mg.id, tables: bad })).body.error).length > 0);
+  const total0 = rs.totalGames;
+  eq((await api(ADMIN, "game/split", { code, game_id: mg.id, tables: good })).status, 200);
+  rs = (await api(ADMIN, `room?code=${code}`)).body;
+  eq(rs.totalGames, total0 + 1);
+  const parts = rs.recent.filter((g: any) => /第[12]桌/.test(g.note ?? ""));
+  eq(parts.length, 2);
+  eq(parts.map((g: any) => g.scores.length).sort(), [4, 5]);
+  eq((await api(ADMIN, "game/split", { code, game_id: mg.id, tables: good })).status, 404, "原本那場已經不在了");
+  for (const g of parts) await api(ADMIN, "game/delete", { code, game_id: g.id });
+  await say(ADMIN, "/取消台費 阿美");
+
   // 台費帳戶
   ok((await say(OTHER, "/設台費 阿美")).includes("只有管理員")); // OTHER 此時還不是管理員
   ok((await say(ADMIN, "/設台費")).includes("目前的台費帳戶：沒有"));

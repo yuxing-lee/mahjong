@@ -35,6 +35,8 @@ export interface Store {
   recordGame(roomId: string, by: string, entries: { player_id: string; points: number }[], note: string, playedAt?: string): Promise<string>;
   deleteGame(roomId: string, gameId: string): Promise<void>;
   setGameDate(roomId: string, gameId: string, playedAt: string): Promise<boolean>;
+  /** 把一場換成多場（每桌一場，日期相同、備註加「第N桌」）；呼叫前要先用 validateSplit 檢查 */
+  splitGame(roomId: string, gameId: string, tables: { player_id: string; points: number }[][]): Promise<void>;
   /** 刪最後一場，沒有則回傳 false */
   deleteLastGame(roomId: string): Promise<boolean>;
 }

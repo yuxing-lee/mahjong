@@ -285,3 +285,43 @@ export function computeAnalysis(playerId: string, players: Player[], games: Game
     partners, rivals, tables, months,
   };
 }
+
+// ───────────────────────── 拆桌 ─────────────────────────
+
+export type Entry = { player_id: string; points: number };
+
+/**
+ * 檢查「把一場拆成多桌」是否對得上原本的紀錄。對的話回傳 null，否則回傳錯誤訊息。
+ * - 每桌至少 2 人、總和為 0、同一桌不能重複
+ * - 一般玩家：剛好出現在一桌，分數和原本相同
+ * - 台費帳戶：可以分到多桌，但各桌加起來要等於原本的數字
+ */
+export function validateSplit(original: Entry[], tables: Entry[][], houseIds: Set<string>): string | null {
+  if (tables.length < 2) return "至少要拆成兩桌";
+  const orig = new Map(original.map((e) => [e.player_id, e.points]));
+  const seen = new Map<string, { count: number; sum: number }>();
+  for (const [i, t] of tables.entries()) {
+    if (t.length < 2) return `第 ${i + 1} 桌至少要 2 個人`;
+    if (new Set(t.map((e) => e.player_id)).size !== t.length) return `第 ${i + 1} 桌有人重複`;
+    if (t.some((e) => !Number.isInteger(e.points))) return "分數要是整數";
+    const sum = t.reduce((a, e) => a + e.points, 0);
+    if (sum !== 0) return `第 ${i + 1} 桌的總和是 ${signed(sum)}，必須是 0`;
+    for (const e of t) {
+      if (!orig.has(e.player_id)) return "有玩家不在原本那一場";
+      const s = seen.get(e.player_id) ?? { count: 0, sum: 0 };
+      s.count += 1;
+      s.sum += e.points;
+      seen.set(e.player_id, s);
+    }
+  }
+  for (const [pid, pts] of orig) {
+    const s = seen.get(pid) ?? { count: 0, sum: 0 };
+    if (houseIds.has(pid)) {
+      if (s.sum !== pts) return "台費加起來要和原本一樣";
+    } else {
+      if (s.count !== 1) return "每位玩家要剛好分到一桌";
+      if (s.sum !== pts) return "玩家的分數不能改";
+    }
+  }
+  return null;
+}

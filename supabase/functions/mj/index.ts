@@ -7,6 +7,7 @@
 //   POST api/game         ← 管理員記一場
 //   POST api/game/delete  ← 管理員刪一場
 //   POST api/game/date    ← 管理員改某場的日期
+//   POST api/game/split   ← 管理員把一場拆成兩桌
 //   POST api/player       ← 管理員加玩家
 //   POST api/claim        ← 玩家認領自己的名字
 //
@@ -21,7 +22,7 @@
 
 import {
   type Analysis, computeAnalysis, computeStandings, cumulativeSeries, formatGameLine, makeRoomCode,
-  parseScoreText, signed, type Standing, validateEntries,
+  parseScoreText, signed, type Standing, validateEntries, validateSplit,
 } from "./logic.ts";
 import { isRoomAdmin, makeStore, parsePlayedAt, type Room, UserError } from "./store.ts";
 
@@ -472,7 +473,7 @@ async function handleApi(req: Request, route: string) {
     const recent = games.map((g, i) => ({ g, no: i + 1 })).slice(-30).reverse().map(({ g, no }) => ({
       id: g.id, played_at: g.played_at, note: g.note, no,
       scores: scores.filter((s) => s.game_id === g.id)
-        .map((s) => ({ name: names.get(s.player_id) ?? "?", points: s.points }))
+        .map((s) => ({ player_id: s.player_id, name: names.get(s.player_id) ?? "?", points: s.points }))
         .sort((a, b) => b.points - a.points),
     }));
     return json({
@@ -518,6 +519,23 @@ async function handleApi(req: Request, route: string) {
     const playedAt = parsePlayedAt(body.played_at);
     if (!playedAt) throw new HttpError(400, "請選擇日期");
     if (!(await store.setGameDate(room.id, String(body.game_id), playedAt))) throw new HttpError(404, "找不到這一場");
+    return json({ ok: true });
+  }
+
+  if (route === "game/split" && req.method === "POST") {
+    requireAdmin();
+    const gameId = String(body.game_id ?? "");
+    const [players, { scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+    const original = scores.filter((s) => s.game_id === gameId).map(({ player_id, points }) => ({ player_id, points }));
+    if (!original.length) throw new HttpError(404, "找不到這一場");
+    const tables = (Array.isArray(body.tables) ? body.tables : []).map((t: unknown) =>
+      (Array.isArray(t) ? t : []).map((e: { player_id: unknown; points: unknown }) => ({
+        player_id: String(e?.player_id), points: Number(e?.points),
+      }))
+    );
+    const err = validateSplit(original, tables, new Set(players.filter((p) => p.is_house).map((p) => p.id)));
+    if (err) throw new HttpError(400, err);
+    await store.splitGame(room.id, gameId, tables);
     return json({ ok: true });
   }
 
