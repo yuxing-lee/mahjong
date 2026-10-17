@@ -1,0 +1,493 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>麻將記分</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #F4F1EA;          /* 牌背米白 */
+    --card: #FFFDF8;
+    --ink: #1D2B24;
+    --muted: #7A857F;
+    --line: #E3DDD0;
+    --felt: #1F5C46;        /* 牌桌綠 */
+    --felt-ink: #F4F1EA;
+    --win: #B83A2E;         /* 台灣習慣：紅色是贏 */
+    --lose: #2E7D4F;
+    --warn: #C98A16;
+    --radius: 14px;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Noto Sans TC", system-ui, sans-serif; font-size: 16px; }
+  body { padding-bottom: calc(96px + env(safe-area-inset-bottom)); }
+
+  header { background: var(--felt); color: var(--felt-ink); padding: 18px 16px 14px; }
+  header h1 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: .02em; }
+  header .sub { margin-top: 4px; font-size: 12px; opacity: .75; display: flex; gap: 10px; flex-wrap: wrap; }
+  .chip { display: inline-block; padding: 1px 8px; border-radius: 99px;
+    background: rgba(255,255,255,.14); font-size: 11px; }
+
+  nav { position: sticky; top: 0; z-index: 5; display: flex; background: var(--felt);
+    padding: 0 8px; gap: 4px; border-bottom: 1px solid rgba(0,0,0,.15); }
+  nav button { flex: 1; background: none; border: 0; color: rgba(244,241,234,.6);
+    font: inherit; font-size: 14px; padding: 10px 0 12px; position: relative; }
+  nav button.on { color: var(--felt-ink); font-weight: 700; }
+  nav button.on::after { content: ""; position: absolute; left: 30%; right: 30%; bottom: 4px;
+    height: 3px; border-radius: 3px; background: #E9C46A; }
+
+  main { padding: 16px; max-width: 560px; margin: 0 auto; }
+  section { display: none; } section.on { display: block; }
+
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 14px; margin-bottom: 12px; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .pos { color: var(--win); } .neg { color: var(--lose); }
+
+  /* 記分 */
+  .row { display: grid; grid-template-columns: 1fr 44px 112px; gap: 8px; align-items: center;
+    padding: 8px 0; border-bottom: 1px dashed var(--line); }
+  .row:last-child { border-bottom: 0; }
+  .row .name { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sign { height: 44px; border-radius: 10px; border: 1px solid var(--line); background: #fff;
+    font: 700 20px var(--mono); color: var(--win); }
+  .sign.minus { color: var(--lose); }
+  .row input { width: 100%; height: 44px; border-radius: 10px; border: 1px solid var(--line);
+    background: #fff; font: 600 18px var(--mono); text-align: right; padding: 0 12px; color: var(--ink); }
+  .row input:focus { outline: 2px solid var(--felt); outline-offset: -1px; }
+
+  .sumbar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--card);
+    border-top: 1px solid var(--line); padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+    display: none; gap: 10px; align-items: center; }
+  .sumbar.on { display: flex; }
+  .sumbar .sum { flex: 1; }
+  .sumbar .sum b { font: 700 22px var(--mono); }
+  .btn { height: 46px; padding: 0 18px; border-radius: 12px; border: 0; font: inherit;
+    font-weight: 700; background: var(--felt); color: var(--felt-ink); }
+  .btn:disabled { opacity: .35; }
+  .btn.ghost { background: transparent; color: var(--felt); border: 1px solid var(--felt); }
+  .btn.small { height: 36px; padding: 0 12px; font-size: 14px; border-radius: 10px; }
+  .inline { display: flex; gap: 8px; margin-top: 10px; }
+  .inline input, select { flex: 1; height: 40px; border-radius: 10px; border: 1px solid var(--line);
+    padding: 0 12px; font: inherit; background: #fff; color: var(--ink); }
+
+  /* 排行 */
+  .rank { display: grid; grid-template-columns: 28px 1fr auto; gap: 10px; align-items: center;
+    padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .rank:last-child { border-bottom: 0; }
+  .medal { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center;
+    font: 700 13px var(--mono); background: var(--bg); color: var(--muted); }
+  .rank:nth-child(1) .medal { background: #E9C46A; color: #5A4300; }
+  .rank:nth-child(2) .medal { background: #D9D9D9; color: #444; }
+  .rank:nth-child(3) .medal { background: #E3B08A; color: #5B3214; }
+  .rank .total { font: 700 18px var(--mono); text-align: right; }
+  .rank .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+  /* 紀錄 */
+  .game { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
+  .game .scores { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 14px; }
+  .del { background: none; border: 0; color: var(--muted); font-size: 13px; padding: 4px; }
+
+  .banner { background: #FFF6DE; border-color: #F0DDA6; }
+  .empty { text-align: center; padding: 36px 12px; color: var(--muted); }
+  .toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 20;
+    background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px;
+    opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; }
+  .toast.on { opacity: 1; }
+  #loading { padding: 80px 16px; text-align: center; color: var(--muted); }
+  .foot { text-align: center; font-size: 11px; color: var(--muted); padding: 20px 0 0; }
+</style>
+</head>
+<body>
+<div id="loading">載入中…</div>
+<div id="app" hidden>
+  <header>
+    <h1 id="roomName"></h1>
+    <div class="sub"><span id="roomMeta"></span><span id="roleChip" class="chip"></span></div>
+  </header>
+  <nav id="tabs"></nav>
+  <main>
+    <div id="claimBox"></div>
+
+    <section id="tab-record">
+      <div class="card">
+        <div class="muted" style="margin-bottom:4px">輸入這一場每位玩家的得失分，沒上桌的留空。</div>
+        <div id="rows"></div>
+        <div class="inline">
+          <input id="note" placeholder="備註（選填，例如：第3將）" maxlength="100">
+        </div>
+      </div>
+      <div class="card">
+        <div class="muted">新增玩家</div>
+        <div class="inline">
+          <input id="newName" placeholder="名字" maxlength="20">
+          <button class="btn small ghost" id="addBtn">加入</button>
+        </div>
+      </div>
+    </section>
+
+    <section id="tab-rank"><div class="card" id="rankList"></div></section>
+
+    <section id="tab-trend">
+      <div class="card" style="height:300px"><canvas id="chart"></canvas></div>
+      <div class="card empty" id="chartEmpty" hidden>還沒有任何對局</div>
+      <div class="muted">每一點是該場結束後的累計分數。</div>
+    </section>
+
+    <section id="tab-history"><div id="history"></div></section>
+
+    <div class="foot">分數僅作為遊戲紀錄，不具任何金錢價值</div>
+  </main>
+</div>
+
+<div class="sumbar" id="sumbar">
+  <div class="sum"><div class="muted">總和（需為 0）</div><b id="sum" class="num">0</b></div>
+  <button class="btn ghost small" id="fillBtn" title="把剩下一位補成讓總和為 0">補平</button>
+  <button class="btn" id="saveBtn" disabled>記這場</button>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+// ===== 設定：部署前改成你的值 =====
+// LIFF_ID 維持 "YOUR_LIFF_ID" 時是「試玩模式」，不需要 LINE 和後端，資料只存在這台裝置。
+const LIFF_ID  = "2011866186-iudTebek";
+// 你的伺服器網址 + /api，例如：
+//   本機＋通道：https://xxxx.trycloudflare.com/api
+//   Supabase： https://<專案ref>.supabase.co/functions/v1/mj/api
+const API_BASE = "https://hofjzjhqizukceosjufr.supabase.co/functions/v1/mj/api";
+// =================================
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const signed = (n) => (n > 0 ? "+" : "") + n;
+const cls = (n) => (n > 0 ? "pos" : n < 0 ? "neg" : "");
+
+let idToken = "", roomCode = "", data = null, chart = null;
+const entry = {}; // player_id -> { sign: 1|-1, value: "" }
+
+function toast(msg) {
+  const t = $("#toast"); t.textContent = msg; t.classList.add("on");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("on"), 2200);
+}
+
+// ---------- 試玩模式：還沒設定 LIFF_ID，或網址帶 ?demo=1 ----------
+const DEMO = LIFF_ID === "YOUR_LIFF_ID" || new URLSearchParams(location.search).get("demo") === "1";
+
+const demo = (() => {
+  const KEY = "mj-demo-v1";
+  const uid = () => Math.random().toString(36).slice(2, 10);
+  const seed = () => {
+    const names = ["小明", "阿華", "老王", "阿美"];
+    const players = names.map((name) => ({ id: uid(), name, line_user_id: null }));
+    const rounds = [[120, -40, -50, -30], [-60, 90, -10, -20], [30, 30, -100, 40], [-20, -30, 80, -30], [150, -50, -50, -50]];
+    const t0 = Date.now() - rounds.length * 3600e3;
+    const games = rounds.map((_, i) => ({ id: uid(), played_at: new Date(t0 + i * 3600e3).toISOString(), note: i === 0 ? "東風" : null }));
+    const scores = rounds.flatMap((r, i) => r.map((points, j) => ({ game_id: games[i].id, player_id: players[j].id, points })));
+    return { players, games, scores };
+  };
+  let db;
+  try { db = JSON.parse(localStorage.getItem(KEY)) || seed(); } catch { db = seed(); }
+  const save = () => { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch {} };
+  const ME = "demo-admin";
+
+  function standings() {
+    const m = new Map(db.players.map((p) => [p.id, { player_id: p.id, name: p.name, total: 0, games: 0, wins: 0, winRate: 0, avg: 0, best: 0, worst: 0 }]));
+    for (const s of db.scores) {
+      const st = m.get(s.player_id); if (!st) continue;
+      if (!st.games) { st.best = st.worst = s.points; }
+      st.total += s.points; st.games++; if (s.points > 0) st.wins++;
+      st.best = Math.max(st.best, s.points); st.worst = Math.min(st.worst, s.points);
+    }
+    const list = [...m.values()];
+    for (const st of list) { st.winRate = st.games ? st.wins / st.games : 0; st.avg = st.games ? Math.round(st.total / st.games * 10) / 10 : 0; }
+    return list.sort((a, b) => b.total - a.total || b.games - a.games);
+  }
+  function series() {
+    const run = new Map(db.players.map((p) => [p.id, 0]));
+    const out = db.players.map((p) => ({ player_id: p.id, name: p.name, values: [] }));
+    for (const g of db.games) {
+      for (const sr of out) {
+        const s = db.scores.find((x) => x.game_id === g.id && x.player_id === sr.player_id);
+        run.set(sr.player_id, run.get(sr.player_id) + (s ? s.points : 0));
+        sr.values.push(run.get(sr.player_id));
+      }
+    }
+    return { labels: db.games.map((_, i) => `#${i + 1}`), series: out };
+  }
+  const name = (id) => db.players.find((p) => p.id === id)?.name ?? "?";
+
+  return async function (path, opts = {}) {
+    const body = opts.body ? JSON.parse(opts.body) : {};
+    const route = path.split("?")[0];
+    if (route === "room") {
+      return {
+        room: { name: "試玩房間", code: "DEMO01", linked: false },
+        me: { isAdmin: true, player: db.players.find((p) => p.line_user_id === ME)?.id ?? null },
+        players: db.players.map((p) => ({ id: p.id, name: p.name, claimed: !!p.line_user_id })),
+        standings: standings(), series: series(), totalGames: db.games.length,
+        recent: db.games.map((g, i) => ({ g, no: i + 1 })).slice(-30).reverse().map(({ g, no }) => ({
+          id: g.id, played_at: g.played_at, note: g.note, no,
+          scores: db.scores.filter((s) => s.game_id === g.id).map((s) => ({ name: name(s.player_id), points: s.points })).sort((a, b) => b.points - a.points),
+        })),
+      };
+    }
+    if (route === "game") {
+      const sc = body.scores || [];
+      if (sc.length < 2) throw new Error("至少需要兩位玩家");
+      const sum = sc.reduce((a, s) => a + s.points, 0);
+      if (sum !== 0) throw new Error(`分數總和必須為 0（目前 ${sum}）`);
+      const g = { id: uid(), played_at: new Date().toISOString(), note: body.note || null };
+      db.games.push(g); for (const s of sc) db.scores.push({ game_id: g.id, ...s }); save(); return { ok: true };
+    }
+    if (route === "game/delete") {
+      db.games = db.games.filter((g) => g.id !== body.game_id);
+      db.scores = db.scores.filter((s) => s.game_id !== body.game_id); save(); return { ok: true };
+    }
+    if (route === "player") {
+      const n = String(body.name || "").trim();
+      if (!n || /[0-9+\-]/.test(n)) throw new Error("名字不能空白，也不能有數字或 +、-");
+      if (db.players.some((p) => p.name === n)) throw new Error("這個名字已經存在");
+      db.players.push({ id: uid(), name: n, line_user_id: null }); save(); return { ok: true };
+    }
+    if (route === "claim") {
+      const p = db.players.find((x) => x.id === body.player_id);
+      if (!p || p.line_user_id) throw new Error("這個名字已經被認領");
+      p.line_user_id = ME; save(); return { ok: true };
+    }
+    throw new Error("not found");
+  };
+})();
+
+async function api(path, opts = {}) {
+  if (DEMO) return demo(path, opts);
+  const res = await fetch(`${API_BASE}/${path}`, {
+    ...opts,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}`, ...(opts.headers || {}) },
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `錯誤 ${res.status}`);
+  return body;
+}
+const post = (path, payload) => api(path, { method: "POST", body: JSON.stringify({ code: roomCode, ...payload }) });
+
+function readRoomCode() {
+  const p = new URLSearchParams(location.search);
+  if (p.get("room")) return p.get("room");
+  const state = p.get("liff.state"); // 初始化前的轉址參數
+  if (state) return new URLSearchParams(state.split("?")[1] || "").get("room");
+  return "";
+}
+
+async function boot() {
+  try {
+    if (DEMO) {
+      roomCode = "DEMO01";
+      await load();
+      $("#loading").hidden = true; $("#app").hidden = false;
+      return;
+    }
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) { liff.login({ redirectUri: location.href }); return; }
+    idToken = liff.getIDToken();
+    roomCode = readRoomCode();
+    if (!roomCode) throw new Error("連結缺少房號，請從群組裡的「開啟記分頁」按鈕進入");
+    await load();
+    $("#loading").hidden = true; $("#app").hidden = false;
+  } catch (e) {
+    $("#loading").textContent = e.message || String(e);
+  }
+}
+
+async function load() {
+  data = await api(`room?code=${encodeURIComponent(roomCode)}`);
+  render();
+}
+
+// ---------- render ----------
+let currentTab = null;
+function render() {
+  const { room, me, totalGames } = data;
+  document.title = room.name;
+  $("#roomName").textContent = room.name;
+  $("#roomMeta").textContent = `房號 ${room.code}・共 ${totalGames} 場` + (DEMO ? "・試玩模式（資料只存在這台裝置）" : "");
+  $("#roleChip").textContent = me.isAdmin ? "管理員" : "成員";
+
+  const tabs = [
+    ...(me.isAdmin ? [["record", "記分"]] : []),
+    ["rank", "排行"], ["trend", "走勢"], ["history", "紀錄"],
+  ];
+  if (!currentTab || !tabs.some(([k]) => k === currentTab)) currentTab = tabs[0][0];
+  $("#tabs").innerHTML = tabs.map(([k, label]) =>
+    `<button data-tab="${k}" class="${k === currentTab ? "on" : ""}">${label}</button>`).join("");
+  $("#tabs").querySelectorAll("button").forEach((b) => b.onclick = () => { currentTab = b.dataset.tab; render(); });
+  document.querySelectorAll("main section").forEach((s) => s.classList.toggle("on", s.id === `tab-${currentTab}`));
+  $("#sumbar").classList.toggle("on", currentTab === "record");
+
+  renderClaim(); renderRows(); renderRank(); renderHistory();
+  if (currentTab === "trend") renderChart();
+}
+
+function renderClaim() {
+  const { me, players } = data;
+  const open = players.filter((p) => !p.claimed);
+  if (me.player || !open.length) { $("#claimBox").innerHTML = ""; return; }
+  $("#claimBox").innerHTML = `
+    <div class="card banner">
+      <div style="font-weight:700">你是哪一位？</div>
+      <div class="muted">認領後就能把這個名字的戰績連到你的 LINE。</div>
+      <div class="inline">
+        <select id="claimSel">${open.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join("")}</select>
+        <button class="btn small" id="claimBtn">認領</button>
+      </div>
+    </div>`;
+  $("#claimBtn").onclick = async () => {
+    try { await post("claim", { player_id: $("#claimSel").value }); toast("已認領"); await load(); }
+    catch (e) { toast(e.message); }
+  };
+}
+
+function renderRows() {
+  if (!data.me.isAdmin) return;
+  for (const p of data.players) entry[p.id] ??= { sign: 1, value: "" };
+  $("#rows").innerHTML = data.players.length ? data.players.map((p) => `
+    <div class="row" data-id="${p.id}">
+      <div class="name">${esc(p.name)}</div>
+      <button class="sign ${entry[p.id].sign < 0 ? "minus" : ""}" aria-label="切換正負">${entry[p.id].sign < 0 ? "−" : "+"}</button>
+      <input inputmode="numeric" pattern="[0-9]*" placeholder="0" value="${entry[p.id].value}">
+    </div>`).join("") : `<div class="empty">還沒有玩家，先在下面新增</div>`;
+
+  $("#rows").querySelectorAll(".row").forEach((row) => {
+    const id = row.dataset.id, btn = row.querySelector(".sign"), input = row.querySelector("input");
+    btn.onclick = () => {
+      entry[id].sign *= -1;
+      btn.classList.toggle("minus", entry[id].sign < 0);
+      btn.textContent = entry[id].sign < 0 ? "−" : "+";
+      updateSum();
+    };
+    input.oninput = () => {
+      // 允許直接輸入負號
+      let v = input.value.replace(/[^\d-]/g, "");
+      if (v.startsWith("-")) { entry[id].sign = -1; btn.classList.add("minus"); btn.textContent = "−"; v = v.slice(1); }
+      v = v.replace(/-/g, "");
+      input.value = v; entry[id].value = v; updateSum();
+    };
+  });
+  updateSum();
+}
+
+function currentScores() {
+  return data.players
+    .filter((p) => entry[p.id] && entry[p.id].value !== "")
+    .map((p) => ({ player_id: p.id, points: entry[p.id].sign * parseInt(entry[p.id].value, 10) }));
+}
+
+function updateSum() {
+  const sc = currentScores();
+  const sum = sc.reduce((a, s) => a + s.points, 0);
+  const el = $("#sum");
+  el.textContent = signed(sum);
+  el.style.color = sum === 0 ? "var(--ink)" : "var(--warn)";
+  $("#saveBtn").disabled = !(sum === 0 && sc.filter((s) => s.points !== 0).length >= 2);
+  const blanks = data.players.filter((p) => entry[p.id]?.value === "");
+  $("#fillBtn").disabled = !(sum !== 0 && blanks.length === 1 && sc.length >= 1);
+}
+
+$("#fillBtn").onclick = () => {
+  const sum = currentScores().reduce((a, s) => a + s.points, 0);
+  const blank = data.players.find((p) => entry[p.id]?.value === "");
+  if (!blank) return;
+  entry[blank.id] = { sign: sum > 0 ? -1 : 1, value: String(Math.abs(sum)) };
+  renderRows();
+};
+
+$("#saveBtn").onclick = async () => {
+  const btn = $("#saveBtn"); btn.disabled = true;
+  try {
+    await post("game", { scores: currentScores(), note: $("#note").value.trim() });
+    for (const k in entry) entry[k] = { sign: 1, value: "" };
+    $("#note").value = "";
+    toast(DEMO ? "已記錄" : "已記錄，並通知群組");
+    await load();
+  } catch (e) { toast(e.message); updateSum(); }
+};
+
+$("#addBtn").onclick = async () => {
+  const name = $("#newName").value.trim();
+  if (!name) return;
+  try { await post("player", { name }); $("#newName").value = ""; toast(`已加入 ${name}`); await load(); }
+  catch (e) { toast(e.message); }
+};
+
+function renderRank() {
+  const list = data.standings.filter((s) => s.games > 0);
+  $("#rankList").innerHTML = list.length ? list.map((s, i) => `
+    <div class="rank">
+      <div class="medal">${i + 1}</div>
+      <div>
+        <div style="font-weight:500">${esc(s.name)}</div>
+        <div class="meta">${s.games} 場・勝率 ${Math.round(s.winRate * 100)}%・場均 <span class="num">${signed(s.avg)}</span>・最佳 <span class="num">${signed(s.best)}</span></div>
+      </div>
+      <div class="total ${cls(s.total)}">${signed(s.total)}</div>
+    </div>`).join("") : `<div class="empty">還沒有任何對局</div>`;
+}
+
+const PALETTE = ["#B83A2E", "#1F5C46", "#C98A16", "#3B5BA9", "#8E44AD", "#16A085", "#D35400", "#7F8C8D", "#2C3E50", "#C0392B"];
+function renderChart() {
+  const { labels, series } = data.series;
+  const active = series.filter((s) => s.values.some((v) => v !== 0));
+  const ctx = $("#chart");
+  if (chart) { chart.destroy(); chart = null; }
+  $("#chartEmpty").hidden = labels.length > 0;
+  ctx.parentElement.hidden = !labels.length;
+  if (!labels.length) return;
+  chart = new Chart(ctx, {
+    type: "line",
+    data: {
+      labels: ["開始", ...labels],
+      datasets: active.map((s, i) => ({
+        label: s.name, data: [0, ...s.values],
+        borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length],
+        tension: .25, pointRadius: labels.length > 30 ? 0 : 2.5, borderWidth: 2,
+      })),
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: "index", intersect: false },
+      plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { family: "Noto Sans TC" } } } },
+      scales: {
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
+        y: { grid: { color: "#E3DDD0" }, ticks: { font: { family: "JetBrains Mono" } } },
+      },
+    },
+  });
+}
+
+function renderHistory() {
+  const { recent, me } = data;
+  $("#history").innerHTML = recent.length ? recent.map((g) => `
+    <div class="card game">
+      <div style="min-width:0">
+        <div><b class="num">#${g.no}</b> <span class="muted">${new Date(g.played_at).toLocaleString("zh-TW", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+          ${g.note ? `<span class="muted">・${esc(g.note)}</span>` : ""}</div>
+        <div class="scores">${g.scores.map((s) => `<span>${esc(s.name)} <b class="num ${cls(s.points)}">${signed(s.points)}</b></span>`).join("")}</div>
+      </div>
+      ${me.isAdmin ? `<button class="del" data-id="${g.id}">刪除</button>` : ""}
+    </div>`).join("") : `<div class="empty">還沒有任何對局</div>`;
+  $("#history").querySelectorAll(".del").forEach((b) => b.onclick = async () => {
+    if (!confirm("確定刪除這一場？")) return;
+    try { await post("game/delete", { game_id: b.dataset.id }); toast("已刪除"); await load(); }
+    catch (e) { toast(e.message); }
+  });
+}
+
+boot();
+</script>
+</body>
+</html>
