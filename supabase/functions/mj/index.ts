@@ -525,9 +525,10 @@ async function handleApi(req: Request, route: string) {
   if (route === "game/split" && req.method === "POST") {
     requireAdmin();
     const gameId = String(body.game_id ?? "");
-    const [players, { scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+    const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+    const game = games.find((g) => g.id === gameId);
     const original = scores.filter((s) => s.game_id === gameId).map(({ player_id, points }) => ({ player_id, points }));
-    if (!original.length) throw new HttpError(404, "找不到這一場");
+    if (!game || !original.length) throw new HttpError(404, "找不到這一場");
     const tables = (Array.isArray(body.tables) ? body.tables : []).map((t: unknown) =>
       (Array.isArray(t) ? t : []).map((e: { player_id: unknown; points: unknown }) => ({
         player_id: String(e?.player_id), points: Number(e?.points),
@@ -535,7 +536,20 @@ async function handleApi(req: Request, route: string) {
     );
     const err = validateSplit(original, tables, new Set(players.filter((p) => p.is_house).map((p) => p.id)));
     if (err) throw new HttpError(400, err);
-    await store.splitGame(room.id, gameId, tables);
+    // 用一般的記分新增各桌（日期同原本、備註加「第N桌」），全部成功才刪掉原本那場；
+    // 中途失敗就把已新增的刪掉，避免重複計分
+    const created: string[] = [];
+    try {
+      for (const [i, t] of tables.entries()) {
+        const at = new Date(new Date(game.played_at).getTime() + i).toISOString();
+        const note = [game.note, `第${i + 1}桌`].filter(Boolean).join("・");
+        created.push(await store.recordGame(room.id, me.userId, t, note, at));
+      }
+      await store.deleteGame(room.id, gameId);
+    } catch (e) {
+      for (const id of created) await store.deleteGame(room.id, id).catch(() => {});
+      throw e;
+    }
     return json({ ok: true });
   }
 

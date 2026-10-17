@@ -131,12 +131,6 @@ export class SupabaseStore implements Store {
     return (data ?? []).length > 0;
   }
 
-  async splitGame(roomId: string, gameId: string, tables: { player_id: string; points: number }[][]) {
-    // 新增各桌、刪掉原本那場在同一個資料庫交易裡完成
-    const { error } = await this.db.rpc("split_game", { p_room_id: roomId, p_game_id: gameId, p_tables: tables });
-    if (error) throw new UserError(error.message);
-  }
-
   async deleteLastGame(roomId: string) {
     const { data: last } = await this.db.from("games").select("id").eq("room_id", roomId)
       .order("played_at", { ascending: false }).limit(1).maybeSingle();

@@ -171,6 +171,10 @@
           <button class="btn small ghost" id="todayBtn" type="button">今天</button>
         </div>
         <div class="datehint" id="dateHint"></div>
+        <div id="splitRec" style="display:none;margin-top:10px">
+          <button class="btn small ghost" id="splitRecBtn" type="button">這是兩桌一起的分數？分兩桌記</button>
+          <div id="splitRecHost"></div>
+        </div>
         <div class="inline">
           <input id="note" placeholder="備註（選填，例如：第3將）" maxlength="100">
         </div>
@@ -490,6 +494,10 @@ function updateSum() {
   el.textContent = signed(sum);
   el.style.color = sum === 0 ? "var(--ink)" : "var(--warn)";
   $("#saveBtn").disabled = !(sum === 0 && sc.filter((s) => s.points !== 0).length >= 2);
+  // 填了 4 人以上（不算台費帳戶）且總和為 0，才提供「分兩桌記」
+  const canSplit = sum === 0 && sc.filter((s) => !isHouse(s.player_id)).length >= 4;
+  $("#splitRec").style.display = canSplit ? "block" : "none";
+  if (!canSplit) $("#splitRecHost").innerHTML = "";
   const blanks = data.players.filter((p) => entry[p.id]?.value === "");
   $("#fillBtn").disabled = !(sum !== 0 && blanks.length === 1 && sc.length >= 1);
 }
@@ -539,6 +547,31 @@ $("#saveBtn").onclick = async () => {
     toast(DEMO ? "已記錄" : "已記錄，並通知群組");
     await load();
   } catch (e) { toast(e.message); updateSum(); }
+};
+
+$("#splitRecBtn").onclick = () => {
+  const host = $("#splitRecHost");
+  host.innerHTML = "";
+  const names = new Map(data.players.map((p) => [p.id, p.name]));
+  const scores = currentScores().map((s) => ({ ...s, name: names.get(s.player_id) }));
+  openSplit(host, scores, {
+    okLabel: "分成兩桌記錄",
+    confirmText: (n1, n2) => `分成兩桌記錄：\n桌 1：${n1}\n桌 2：${n2}\n\n確定嗎？`,
+    onConfirm: async (tables) => {
+      const d = $("#playDate").value || todayStr();
+      const base = d !== todayStr() ? dateWithTime(d) : new Date().toISOString();
+      const note = $("#note").value.trim();
+      for (const [i, t] of tables.entries()) {
+        await post("game", {
+          scores: t, note: [note, `第${i + 1}桌`].filter(Boolean).join("・"),
+          played_at: new Date(new Date(base).getTime() + i).toISOString(),
+        });
+      }
+      for (const k in entry) entry[k] = { sign: 1, value: "" };
+      $("#note").value = "";
+      toast(DEMO ? "已分兩桌記錄" : "已分兩桌記錄，並通知群組");
+    },
+  });
 };
 
 $("#addBtn").onclick = async () => {
@@ -782,7 +815,11 @@ function renderHistory() {
   $("#history").querySelectorAll(".splitbtn").forEach((b) => b.onclick = () => {
     const card = b.closest(".game");
     if (card.querySelector(".split")) return;
-    openSplit(card.firstElementChild, data.recent.find((g) => g.id === b.dataset.id));
+    const game = data.recent.find((g) => g.id === b.dataset.id);
+    openSplit(card.firstElementChild, game.scores, {
+      confirmText: (n1, n2) => `拆成兩桌：\n桌 1：${n1}\n桌 2：${n2}\n\n原本這一場會被兩桌取代，確定嗎？`,
+      onConfirm: async (tables) => { await post("game/split", { game_id: game.id, tables }); toast("已拆成兩桌"); },
+    });
   });
   $("#history").querySelectorAll(".del:not(.redate):not(.splitbtn)").forEach((b) => b.onclick = async () => {
     if (!confirm("確定刪除這一場？")) return;
@@ -822,11 +859,12 @@ function findSplits(scores, max = Infinity) {
   return out.sort((x, y) => x.score - y.score).slice(0, max).map((c) => ({ ...c, house }));
 }
 
-function openSplit(host, game) {
-  const houses = game.scores.filter((s) => isHouse(s.player_id));
+/** 拆桌面板：scores 是 {player_id, name, points}[]；確認後呼叫 opts.onConfirm(各桌的分數) */
+function openSplit(host, scores, opts) {
+  const houses = scores.filter((s) => isHouse(s.player_id));
   const house = houses.length === 1 ? houses[0] : null;
-  const others = game.scores.filter((s) => s !== house);
-  const all = findSplits(game.scores);
+  const others = scores.filter((s) => s !== house);
+  const all = findSplits(scores);
   const cands = all.slice(0, 6);
   const assign = new Map(others.map((s, i) => [s.player_id, i < Math.ceil(others.length / 2) ? 0 : 1]));
   let picked = -1;
@@ -887,7 +925,7 @@ function openSplit(host, game) {
       </div>`).join("")}</div>
       ${errs.length ? `<div class="datehint" style="display:block">${errs.map(esc).join("；")}</div>` : ""}
       <div class="inline">
-        <button class="btn small" data-act="ok" ${errs.length ? "disabled" : ""}>確認拆成兩桌</button>
+        <button class="btn small" data-act="ok" ${errs.length ? "disabled" : ""}>${opts.okLabel || "確認拆成兩桌"}</button>
         <button class="btn small ghost" data-act="cancel">取消</button>
       </div>`;
     box.querySelectorAll(".cand").forEach((b) => b.onclick = () => pickCand(Number(b.dataset.i)));
@@ -898,9 +936,10 @@ function openSplit(host, game) {
     box.querySelector('[data-act="ok"]').onclick = async () => {
       const { t } = tables();
       const payload = t.map((rows) => rows.map(({ player_id, points }) => ({ player_id, points })));
-      if (!confirm(`拆成兩桌：\n桌 1：${names(t[0])}\n桌 2：${names(t[1])}\n\n原本這一場會被兩桌取代，確定嗎？`)) return;
-      try { await post("game/split", { game_id: game.id, tables: payload }); toast("已拆成兩桌"); await load(); }
-      catch (e) { toast(e.message); }
+      if (!confirm(opts.confirmText(names(t[0]), names(t[1])))) return;
+      const ok = box.querySelector('[data-act="ok"]'); ok.disabled = true;
+      try { await opts.onConfirm(payload); box.remove(); await load(); }
+      catch (e) { toast(e.message); ok.disabled = false; }
     };
   }
 
