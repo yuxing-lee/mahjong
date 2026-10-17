@@ -74,6 +74,7 @@ flowchart LR
 | `/分析 名字` | 所有人 | 個人摘要：勝率、近 10 場、最順的同桌、剋星、提款機（不打名字＝看自己，需先認領） |
 | `/撤銷` | 管理員 | 刪最後一場 |
 | `/刪房` | 管理員 | 刪除房間和所有紀錄（會先要求 `/刪房 確認`） |
+| `/設台費 名字`、`/取消台費 名字` | 管理員 | 台費帳戶（例如場主設備錢「東」）照樣記分、照樣出現在排行，但不列入個人分析 |
 | `/設管理員 @某人` | 管理員 | 設成管理員（也可以用已認領的名字：`/設管理員 阿華`） |
 | `/移除管理員 @某人` | 管理員 | 取消管理員（房主不能被移除） |
 | `/管理員` | 所有人 | 列出房主和管理員 |
@@ -83,6 +84,7 @@ flowchart LR
 - Bot 每次回覆會附 **快速回覆按鈕**（戰績／最近／記分頁／撤銷／說明），點了就送出指令。
 - 不是 `/` 開頭的訊息 Bot 不回，不會洗版。
 - 指令都用「回覆」，**不計入**官方帳號的免費訊息額度；只有在記分頁送出一場時會「主動推播」一則到群組，這會計入額度。
+- 記完一場只顯示這一場的結果，不附累計；要看累計請用 `/戰績`。
 
 ### 記分頁
 
@@ -129,6 +131,8 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
 | `games` | 每一場 |
 | `scores` | 每場每人的分數 |
 | `room_admins` | 房主以外的管理員 |
+
+`players.is_house = true` 代表台費帳戶（目前「紅中」房的「東」）。
 
 記一場是透過資料庫函式 `record_game()`，在同一個交易裡再檢查一次「至少兩人、總和為 0、玩家屬於這個房間」。
 
@@ -189,7 +193,8 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
    ├─ config.toml                     CLI 設定（mj 關閉 verify_jwt）
    ├─ migrations/
    │  ├─ 001_init.sql                 rooms / players / games / scores + record_game()
-   │  └─ 002_room_admins.sql          多位管理員
+   │  ├─ 002_room_admins.sql          多位管理員
+   │  └─ 003_house_player.sql         台費帳戶（players.is_house）
    └─ functions/mj/
       ├─ index.ts                     Bot webhook + 記分頁 API
       ├─ logic.ts                     解析分數、計算戰績、個人分析（純邏輯）

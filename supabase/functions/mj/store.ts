@@ -26,6 +26,7 @@ export interface Store {
   /** 插入不存在的名字，回傳實際新增的名字 */
   insertPlayers(roomId: string, names: string[]): Promise<string[]>;
   claimPlayer(roomId: string, playerId: string, lineUserId: string): Promise<void>;
+  setHouse(roomId: string, playerId: string, isHouse: boolean): Promise<void>;
 
   /** games 由舊到新 */
   gamesOf(roomId: string): Promise<{ games: Game[]; scores: Score[] }>;

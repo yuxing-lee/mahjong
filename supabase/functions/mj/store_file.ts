@@ -102,7 +102,7 @@ export class FileStore implements Store {
   playersOf(roomId: string) {
     return this.run(() =>
       this.data.players.filter((p) => p.room_id === roomId)
-        .map(({ id, name, line_user_id }) => ({ id, name, line_user_id }))
+        .map(({ id, name, line_user_id, is_house }) => ({ id, name, line_user_id, is_house: !!is_house }))
     );
   }
 
@@ -128,6 +128,13 @@ export class FileStore implements Store {
       if (!target) throw new UserError("找不到這位玩家");
       if (target.line_user_id) throw new UserError("這個名字已經被認領");
       target.line_user_id = lineUserId;
+    }, true);
+  }
+
+  setHouse(roomId: string, playerId: string, isHouse: boolean) {
+    return this.run(() => {
+      const p = this.data.players.find((x) => x.id === playerId && x.room_id === roomId);
+      if (p) p.is_house = isHouse;
     }, true);
   }
 

@@ -95,3 +95,19 @@ Deno.test("個人分析：同桌、對手、整桌、連勝、月份", () => {
   const r2 = computeAnalysis("b", P, games, scores)!;
   assertEquals(r2.streak, -3);
 });
+
+Deno.test("台費帳戶不列入分析", () => {
+  const players = [...P.slice(0, 3), { id: "d", name: "東", line_user_id: null, is_house: true }];
+  const games = [{ id: "g1", played_at: "2026-10-01T12:00:00Z", note: null }, { id: "g2", played_at: "2026-10-02T12:00:00Z", note: null }];
+  const scores = [
+    { game_id: "g1", player_id: "a", points: 100 }, { game_id: "g1", player_id: "b", points: -80 }, { game_id: "g1", player_id: "d", points: -20 },
+    { game_id: "g2", player_id: "a", points: -50 }, { game_id: "g2", player_id: "b", points: 70 }, { game_id: "g2", player_id: "d", points: -20 },
+  ];
+  const r = computeAnalysis("a", players, games, scores)!;
+  assertEquals(r.partners.map((p) => p.name), ["阿華"]);
+  assertEquals(r.rivals.map((p) => p.name), ["阿華"]);
+  assertEquals(r.tables.length, 1);
+  assertEquals(r.tables[0].names, ["阿華"]);
+  assertEquals(r.games, 2); // 自己的場次照算
+  assertEquals(computeAnalysis("d", players, games, scores), null);
+});

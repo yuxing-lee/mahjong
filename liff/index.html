@@ -160,6 +160,7 @@
         <div class="muted">以誰為主角？</div>
         <div class="inline" style="margin-top:6px"><select id="anPlayer" aria-label="選擇玩家"></select></div>
       </div>
+      <div class="muted" id="anHouseNote" style="margin:-4px 2px 10px"></div>
       <div id="anBody"></div>
     </section>
 
@@ -258,7 +259,7 @@ const demo = (() => {
       return {
         room: { name: "試玩房間", code: "DEMO01", linked: false },
         me: { isAdmin: true, player: db.players.find((p) => p.line_user_id === ME)?.id ?? null },
-        players: db.players.map((p) => ({ id: p.id, name: p.name, claimed: !!p.line_user_id })),
+        players: db.players.map((p) => ({ id: p.id, name: p.name, claimed: !!p.line_user_id, house: !!p.is_house })),
         standings: standings(), series: series(), totalGames: db.games.length,
         recent: db.games.map((g, i) => ({ g, no: i + 1 })).slice(-30).reverse().map(({ g, no }) => ({
           id: g.id, played_at: g.played_at, note: g.note, no,
@@ -487,12 +488,15 @@ const anCache = new Map(); // player_id -> analysis（資料更新時清掉）
 
 function renderAnalysis() {
   const sel = $("#anPlayer");
-  const list = data.standings.filter((s) => s.games > 0);
+  const house = new Set(data.players.filter((p) => p.house).map((p) => p.id));
+  const list = data.standings.filter((s) => s.games > 0 && !house.has(s.player_id));
   if (!list.length) { sel.innerHTML = ""; $("#anBody").innerHTML = `<div class="card empty">還沒有任何對局</div>`; return; }
+  const houseNames = data.players.filter((p) => p.house).map((p) => p.name);
   if (!anPlayerId || !list.some((s) => s.player_id === anPlayerId)) {
     anPlayerId = (data.me.player && list.some((s) => s.player_id === data.me.player)) ? data.me.player : list[0].player_id;
   }
   sel.innerHTML = list.map((s) => `<option value="${s.player_id}" ${s.player_id === anPlayerId ? "selected" : ""}>${esc(s.name)}${s.player_id === data.me.player ? "（我）" : ""}</option>`).join("");
+  $("#anHouseNote").textContent = houseNames.length ? `「${houseNames.join("、")}」是台費帳戶，不列入分析。` : "";
   sel.onchange = () => { anPlayerId = sel.value; anShowAllTables = false; renderAnalysis(); };
   const cached = anCache.get(anPlayerId);
   if (cached) return drawAnalysis(cached);
@@ -577,13 +581,14 @@ function drawAnalysis(a) {
 /** 試玩模式用：和後端 computeAnalysis 同樣的算法 */
 function analyzeLocal(pid, players, games, scores) {
   const me = players.find((p) => p.id === pid);
-  if (!me) return null;
+  if (!me || me.is_house) return null;
   const nameOf = new Map(players.map((p) => [p.id, p.name]));
+  const house = new Set(players.filter((p) => p.is_house).map((p) => p.id));
   const r1 = (n) => Math.round(n * 10) / 10;
   const mine = games.map((g) => {
     const gs = scores.filter((s) => s.game_id === g.id);
     const mineS = gs.find((s) => s.player_id === pid);
-    return mineS ? { g, points: mineS.points, others: gs.filter((s) => s.player_id !== pid) } : null;
+    return mineS ? { g, points: mineS.points, others: gs.filter((s) => s.player_id !== pid && !house.has(s.player_id)) } : null;
   }).filter(Boolean);
   const pts = mine.map((m) => m.points);
   const wins = pts.filter((p) => p > 0).length, total = pts.reduce((a, b) => a + b, 0), last10 = pts.slice(-10);

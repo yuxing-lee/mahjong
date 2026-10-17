@@ -63,7 +63,7 @@ export class SupabaseStore implements Store {
 
   async playersOf(roomId: string) {
     const { data, error } = await this.db.from("players")
-      .select("id,name,line_user_id").eq("room_id", roomId).order("created_at");
+      .select("id,name,line_user_id,is_house").eq("room_id", roomId).order("created_at");
     if (error) throw error;
     return data ?? [];
   }
@@ -86,6 +86,11 @@ export class SupabaseStore implements Store {
     if (target.line_user_id) throw new UserError("這個名字已經被認領");
     const { error } = await this.db.from("players").update({ line_user_id: lineUserId })
       .eq("id", playerId).is("line_user_id", null);
+    if (error) throw error;
+  }
+
+  async setHouse(roomId: string, playerId: string, isHouse: boolean) {
+    const { error } = await this.db.from("players").update({ is_house: isHouse }).eq("id", playerId).eq("room_id", roomId);
     if (error) throw error;
   }
 

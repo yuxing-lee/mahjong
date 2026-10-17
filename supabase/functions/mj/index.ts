@@ -216,6 +216,7 @@ const HELP = [
   "/分析 名字　某人的勝率、最順的同桌、剋星（不打名字＝看自己）",
   "/撤銷　刪掉最後一場（管理員）",
   "/刪房　刪除這個房間和所有紀錄（管理員）",
+  "/設台費 名字　把場主設備錢之類的帳戶排除在分析外（管理員）",
   "/設管理員 @某人　把他設成管理員（管理員）",
   "/移除管理員 @某人　取消他的管理員（管理員）",
   "/管理員　看目前有哪些管理員",
@@ -309,6 +310,7 @@ async function handleEvent(ev: any) {
             ? `找不到玩家「${name}」。目前玩家：${players.map((p) => p.name).join("、")}`
             : `用法：/分析 名字\n或先到記分頁「認領」自己的名字，之後打 /分析 就會看自己的。`)]);
         }
+        if (target.is_house) return void await r([text(`「${target.name}」是台費帳戶，不列入分析。`)]);
         return void await r([text(analysisText(computeAnalysis(target.id, players, games, scores)!, room))]);
       }
 
@@ -326,7 +328,7 @@ async function handleEvent(ev: any) {
       }
     }
 
-    if (["/加人", "/記", "/撤銷", "/刪房", "/設管理員", "/移除管理員"].includes(cmd) && !isAdmin) {
+    if (["/加人", "/記", "/撤銷", "/刪房", "/設管理員", "/移除管理員", "/設台費", "/取消台費"].includes(cmd) && !isAdmin) {
       return void await r([text("只有管理員可以操作這個指令。")]);
     }
 
@@ -347,16 +349,34 @@ async function handleEvent(ev: any) {
         const check = validateEntries(parseScoreText(args), players);
         if (!check.ok) return void await r([text(`⚠️ ${check.error}`)]);
         await store.recordGame(room.id, userId!, check.entries.map((e) => ({ player_id: e.player.id, points: e.points })), "");
-        const { games, scores } = await store.gamesOf(room.id);
+        const { games } = await store.gamesOf(room.id);
         return void await r([
           text(gameResultText(room, check.entries.map((e) => ({ name: e.player.name, points: e.points })), games.length)),
-          standingsFlex(room, computeStandings(players, scores), "累計戰績"),
         ]);
       }
 
       case "/撤銷": {
         const ok = await store.deleteLastGame(room.id);
         return void await r([text(ok ? "↩️ 已刪除最後一場。" : "沒有可以撤銷的對局。")]);
+      }
+
+      case "/設台費":
+      case "/取消台費": {
+        const players = await store.playersOf(room.id);
+        const name = args.replace(/^@/, "").trim();
+        const target = players.find((p) => p.name === name);
+        if (!target) {
+          const house = players.filter((p) => p.is_house).map((p) => p.name);
+          return void await r([text(
+            `用法：${cmd} 名字\n台費帳戶（例如場主的設備錢）照樣記分，但不列入個人分析。` +
+              `\n目前的台費帳戶：${house.length ? house.join("、") : "沒有"}`,
+          )]);
+        }
+        const on = cmd === "/設台費";
+        await store.setHouse(room.id, target.id, on);
+        return void await r([text(on
+          ? `✅ 「${target.name}」設為台費帳戶，之後不列入分析。`
+          : `✅ 「${target.name}」恢復成一般玩家。`)]);
       }
 
       case "/設管理員":
@@ -449,7 +469,7 @@ async function handleApi(req: Request, route: string) {
     return json({
       room: { name: room.name, code: room.code, linked: !!room.line_group_id },
       me: { isAdmin, player: players.find((p) => p.line_user_id === me.userId)?.id ?? null },
-      players: players.map((p) => ({ id: p.id, name: p.name, claimed: !!p.line_user_id })),
+      players: players.map((p) => ({ id: p.id, name: p.name, claimed: !!p.line_user_id, house: !!p.is_house })),
       standings: computeStandings(players, scores),
       series: cumulativeSeries(players, games, scores),
       recent,
@@ -460,7 +480,7 @@ async function handleApi(req: Request, route: string) {
   if (route === "analysis" && req.method === "GET") {
     const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
     const a = computeAnalysis(String(url.searchParams.get("player") ?? ""), players, games, scores);
-    if (!a) throw new HttpError(404, "找不到這位玩家");
+    if (!a) throw new HttpError(404, "找不到這位玩家，或他是台費帳戶");
     return json({ ...a, minPairGames: MIN_PAIR_GAMES });
   }
 
@@ -472,13 +492,11 @@ async function handleApi(req: Request, route: string) {
     await store.recordGame(room.id, me.userId, entries, String(body.note ?? "").slice(0, 100));
 
     if (room.line_group_id) {
-      const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+      const [players, { games }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
       const names = new Map(players.map((p) => [p.id, p.name]));
       const line = entries.map((e: { player_id: string; points: number }) => ({ name: names.get(e.player_id) ?? "?", points: e.points }));
-      const totals = computeStandings(players, scores).filter((s) => s.games)
-        .map((s) => `${s.name} ${signed(s.total)}`).join("｜");
-      // 主動推播會計入官方帳號訊息額度；只推一則文字
-      await push(room.line_group_id, [text(`${gameResultText(room, line, games.length)}\n\n累計：${totals}`)]);
+      // 主動推播會計入官方帳號訊息額度；只推一則文字（累計請看 /戰績）
+      await push(room.line_group_id, [text(gameResultText(room, line, games.length))]);
     }
     return json({ ok: true });
   }

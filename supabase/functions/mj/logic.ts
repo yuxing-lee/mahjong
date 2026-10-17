@@ -1,6 +1,10 @@
 // 純邏輯：不碰網路或資料庫，方便測試
 
-export type Player = { id: string; name: string; line_user_id: string | null };
+export type Player = {
+  id: string; name: string; line_user_id: string | null;
+  /** 台費帳戶（例如場主的設備錢）：照樣記分，但不列入個人分析 */
+  is_house?: boolean;
+};
 export type Score = { game_id: string; player_id: string; points: number };
 export type Game = { id: string; played_at: string; note: string | null };
 
@@ -178,8 +182,10 @@ export function monthOf(iso: string): string {
  */
 export function computeAnalysis(playerId: string, players: Player[], games: Game[], scores: Score[]): Analysis | null {
   const me = players.find((p) => p.id === playerId);
-  if (!me) return null;
+  if (!me || me.is_house) return null;
   const nameOf = new Map(players.map((p) => [p.id, p.name]));
+  // 台費帳戶不算「同桌的人」
+  const house = new Set(players.filter((p) => p.is_house).map((p) => p.id));
   const byGame = new Map<string, Map<string, number>>();
   for (const s of scores) {
     if (!byGame.has(s.game_id)) byGame.set(s.game_id, new Map());
@@ -190,7 +196,7 @@ export function computeAnalysis(playerId: string, players: Player[], games: Game
   for (const g of games) {
     const gm = byGame.get(g.id);
     if (!gm || !gm.has(playerId)) continue;
-    const others = new Map([...gm].filter(([id]) => id !== playerId));
+    const others = new Map([...gm].filter(([id]) => id !== playerId && !house.has(id)));
     mine.push({ game: g, points: gm.get(playerId)!, others });
   }
 

@@ -85,6 +85,7 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq((await api(ADMIN, "game", { code, scores: [{ player_id: id("小明"), points: 10 }, { player_id: id("阿華"), points: -5 }] })).status, 400);
   eq((await api(ADMIN, "game", { code, scores: [{ player_id: id("小明"), points: 10 }, { player_id: id("阿華"), points: -10 }], note: "東風" })).status, 200);
   ok(sent.some((s) => s.kind === "push" && s.body.to === GROUP), "記分頁送出後要推播到群組");
+  ok(!JSON.stringify(sent.filter((s) => s.kind === "push").at(-1)!.body).includes("累計"), "推播不附累計");
 
   eq((await api(OTHER, "claim", { code, player_id: id("阿華") })).status, 200);
   eq((await api(OTHER, "claim", { code, player_id: id("老王") })).body.error, "你已經認領過了");
@@ -99,6 +100,23 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq(an.body.name, "小明");
   ok(an.body.partners.length > 0 && an.body.minPairGames === 3);
   eq((await api(OTHER, `analysis?code=${code}&player=nope`)).status, 404);
+
+  // 台費帳戶
+  ok((await say(OTHER, "/設台費 阿美")).includes("只有管理員")); // OTHER 此時還不是管理員
+  ok((await say(ADMIN, "/設台費")).includes("目前的台費帳戶：沒有"));
+  ok((await say(ADMIN, "/設台費 阿美")).includes("設為台費帳戶"));
+  ok((await say(ADMIN, "/分析 阿美")).includes("台費帳戶"));
+  eq((await api(OTHER, `analysis?code=${code}&player=${id("阿美")}`)).status, 404);
+  const mingAn = (await api(OTHER, `analysis?code=${code}&player=${id("小明")}`)).body;
+  ok(!mingAn.partners.some((p: any) => p.name === "阿美"), "分析裡不能出現台費帳戶");
+  eq((await api(OTHER, `room?code=${code}`)).body.players.find((p: any) => p.name === "阿美").house, true);
+  ok((await say(ADMIN, "/取消台費 阿美")).includes("恢復成一般玩家"));
+
+  // 記分後只回這一場，不附累計
+  const recMsgs = (await say(ADMIN, "/記 小明+5 阿華-5"), sent.at(-1)!.body.messages);
+  eq(recMsgs.length, 1);
+  ok(!JSON.stringify(recMsgs).includes("累計"));
+  await say(ADMIN, "/撤銷");
 
   // 多位管理員：@標記 或 已認領的名字都可以
   const THIRD = "Uthird";
