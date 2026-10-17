@@ -65,8 +65,21 @@ async function lineCall(path: string, body: unknown) {
   if (!res.ok) console.error(`LINE ${path} failed`, res.status, await res.text());
 }
 
-const reply = (replyToken: string, messages: Message[]) =>
-  lineCall("reply", { replyToken, messages: messages.slice(0, 5) });
+// 快速回覆按鈕：出現在輸入框上方，點了就會用使用者的名義送出指令（群組也能用）
+const QUICK_COMMANDS = ["/戰績", "/最近", "/記分頁", "/撤銷", "/說明"];
+const quickReply = {
+  items: QUICK_COMMANDS.map((cmd) => ({
+    type: "action",
+    action: { type: "message", label: cmd.slice(1), text: cmd },
+  })),
+};
+
+const reply = (replyToken: string, messages: Message[]) => {
+  const msgs = messages.slice(0, 5);
+  // 只掛在最後一則訊息上（LINE 只看最後一則的 quickReply）
+  if (msgs.length) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], quickReply };
+  return lineCall("reply", { replyToken, messages: msgs });
+};
 const push = (to: string, messages: Message[]) =>
   lineCall("push", { to, messages: messages.slice(0, 5) });
 
@@ -157,6 +170,7 @@ const HELP = [
   "/撤銷　刪掉最後一場（管理員）",
   "/記分頁　開啟記分頁面",
   "",
+  "＊輸入框上方的按鈕點了就會送出指令",
   "＊加人、記分、撤銷只有管理員能操作",
   "＊分數只作為遊戲紀錄，不具任何金錢價值",
 ].join("\n");

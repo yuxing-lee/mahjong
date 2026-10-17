@@ -88,6 +88,9 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq((await api(OTHER, `room?code=${code}`)).body.me.player, id("阿華"));
 
   ok((await say(ADMIN, "/撤銷")).includes("已刪除最後一場"));
+  const lastMsgs = sent.at(-1)!.body.messages;
+  eq(lastMsgs.at(-1).quickReply.items.map((i: any) => i.action.text),
+    ["/戰績", "/最近", "/記分頁", "/撤銷", "/說明"], "回覆的最後一則要帶快速回覆按鈕");
   eq((await api(ADMIN, `room?code=${code}`)).body.totalGames, 2);
 
   // 資料真的寫進檔案
