@@ -42,6 +42,25 @@ export class SupabaseStore implements Store {
     if (error) throw error;
   }
 
+  async adminsOf(roomId: string) {
+    const { data, error } = await this.db.from("room_admins").select("line_user_id").eq("room_id", roomId);
+    if (error) throw error;
+    return (data ?? []).map((r) => r.line_user_id as string);
+  }
+
+  async addAdmin(roomId: string, lineUserId: string, addedBy: string) {
+    const { error } = await this.db.from("room_admins")
+      .upsert({ room_id: roomId, line_user_id: lineUserId, added_by: addedBy }, { onConflict: "room_id,line_user_id", ignoreDuplicates: true });
+    if (error) throw error;
+  }
+
+  async removeAdmin(roomId: string, lineUserId: string) {
+    const { data, error } = await this.db.from("room_admins").delete()
+      .eq("room_id", roomId).eq("line_user_id", lineUserId).select("line_user_id");
+    if (error) throw error;
+    return (data ?? []).length > 0;
+  }
+
   async playersOf(roomId: string) {
     const { data, error } = await this.db.from("players")
       .select("id,name,line_user_id").eq("room_id", roomId).order("created_at");

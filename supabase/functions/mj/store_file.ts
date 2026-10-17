@@ -4,7 +4,8 @@ import { checkGame, type Room, type Store, UserError } from "./store.ts";
 
 type GameRow = Game & { room_id: string; created_by: string };
 type PlayerRow = Player & { room_id: string; created_at: string };
-type Data = { rooms: Room[]; players: PlayerRow[]; games: GameRow[]; scores: Score[] };
+type AdminRow = { room_id: string; line_user_id: string; added_by: string };
+type Data = { rooms: Room[]; players: PlayerRow[]; games: GameRow[]; scores: Score[]; admins?: AdminRow[] };
 
 export class FileStore implements Store {
   private data: Data = { rooms: [], players: [], games: [], scores: [] };
@@ -73,6 +74,28 @@ export class FileStore implements Store {
       this.data.games = this.data.games.filter((g) => g.room_id !== roomId);
       this.data.players = this.data.players.filter((p) => p.room_id !== roomId);
       this.data.rooms = this.data.rooms.filter((r) => r.id !== roomId);
+      this.data.admins = (this.data.admins ?? []).filter((a) => a.room_id !== roomId);
+    }, true);
+  }
+
+  adminsOf(roomId: string) {
+    return this.run(() => (this.data.admins ?? []).filter((a) => a.room_id === roomId).map((a) => a.line_user_id));
+  }
+
+  addAdmin(roomId: string, lineUserId: string, addedBy: string) {
+    return this.run(() => {
+      const list = (this.data.admins ??= []);
+      if (!list.some((a) => a.room_id === roomId && a.line_user_id === lineUserId)) {
+        list.push({ room_id: roomId, line_user_id: lineUserId, added_by: addedBy });
+      }
+    }, true);
+  }
+
+  removeAdmin(roomId: string, lineUserId: string) {
+    return this.run(() => {
+      const before = (this.data.admins ?? []).length;
+      this.data.admins = (this.data.admins ?? []).filter((a) => !(a.room_id === roomId && a.line_user_id === lineUserId));
+      return this.data.admins.length !== before;
     }, true);
   }
 

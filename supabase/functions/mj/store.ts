@@ -17,6 +17,11 @@ export interface Store {
   /** 刪除房間和裡面所有玩家、對局 */
   deleteRoom(roomId: string): Promise<void>;
 
+  /** 額外的管理員（不含房主） */
+  adminsOf(roomId: string): Promise<string[]>;
+  addAdmin(roomId: string, lineUserId: string, addedBy: string): Promise<void>;
+  removeAdmin(roomId: string, lineUserId: string): Promise<boolean>;
+
   playersOf(roomId: string): Promise<Player[]>;
   /** 插入不存在的名字，回傳實際新增的名字 */
   insertPlayers(roomId: string, names: string[]): Promise<string[]>;
@@ -32,6 +37,13 @@ export interface Store {
 }
 
 export class UserError extends Error {}
+
+/** 房主或被加為管理員的人 */
+export async function isRoomAdmin(store: Store, room: Room, lineUserId: string | undefined) {
+  if (!lineUserId) return false;
+  if (room.admin_line_user_id === lineUserId) return true;
+  return (await store.adminsOf(room.id)).includes(lineUserId);
+}
 
 export function checkGame(entries: { player_id: string; points: number }[], roomPlayerIds: Set<string>) {
   if (entries.length < 2) throw new UserError("至少需要兩位玩家");

@@ -21,7 +21,7 @@ import {
   computeStandings, cumulativeSeries, formatGameLine, makeRoomCode,
   parseScoreText, signed, type Standing, validateEntries,
 } from "./logic.ts";
-import { makeStore, type Room, UserError } from "./store.ts";
+import { isRoomAdmin, makeStore, type Room, UserError } from "./store.ts";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const store = await makeStore();
@@ -80,6 +80,23 @@ const reply = (replyToken: string, messages: Message[], withQuickReply = true) =
   if (msgs.length && withQuickReply) msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], quickReply };
   return lineCall("reply", { replyToken, messages: msgs });
 };
+async function lineGet(path: string) {
+  const token = env("LINE_CHANNEL_ACCESS_TOKEN");
+  if (!token) return null;
+  const res = await fetch(`https://api.line.me/v2/bot/${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  return res.ok ? await res.json() : null;
+}
+
+/** 群組成員的 LINE 顯示名稱；拿不到就用認領的玩家名字 */
+async function displayName(groupId: string | null, roomId: string, lineUserId: string) {
+  if (groupId) {
+    const p = await lineGet(`group/${groupId}/member/${lineUserId}`).catch(() => null);
+    if (p?.displayName) return p.displayName as string;
+  }
+  const claimed = (await store.playersOf(roomId)).find((pl) => pl.line_user_id === lineUserId);
+  return claimed?.name ?? "（未知成員）";
+}
+
 const push = (to: string, messages: Message[]) =>
   lineCall("push", { to, messages: messages.slice(0, 5) });
 
@@ -169,14 +186,30 @@ const HELP = [
   "/最近　看最近 5 場",
   "/撤銷　刪掉最後一場（管理員）",
   "/刪房　刪除這個房間和所有紀錄（管理員）",
+  "/設管理員 @某人　把他設成管理員（管理員）",
+  "/移除管理員 @某人　取消他的管理員（管理員）",
+  "/管理員　看目前有哪些管理員",
   "/記分頁　開啟記分頁面",
   "",
   "＊輸入框上方的按鈕點了就會送出指令",
-  "＊加人、記分、撤銷、刪房只有管理員能操作",
+  "＊加人、記分、撤銷、刪房、設管理員只有管理員能操作",
   "＊分數只作為遊戲紀錄，不具任何金錢價值",
 ].join("\n");
 
 // ───────────────────────── Webhook ─────────────────────────
+
+/** 從 @標記 或「已認領的玩家名字」找出要操作的 LINE 使用者 */
+// deno-lint-ignore no-explicit-any
+async function resolveTargets(ev: any, room: Room): Promise<string[]> {
+  // deno-lint-ignore no-explicit-any
+  const mentioned = ((ev.message?.mention?.mentionees ?? []) as any[])
+    .filter((m) => m.type !== "all" && m.userId && !m.isSelf)
+    .map((m) => m.userId as string);
+  if (mentioned.length) return [...new Set(mentioned)];
+  const names = String(ev.message?.text ?? "").split(/\s+/).slice(1).map((n) => n.replace(/^@/, "")).filter(Boolean);
+  const players = await store.playersOf(room.id);
+  return [...new Set(names.map((n) => players.find((p) => p.name === n)?.line_user_id).filter((x): x is string => !!x))];
+}
 
 // deno-lint-ignore no-explicit-any
 async function handleEvent(ev: any) {
@@ -202,7 +235,7 @@ async function handleEvent(ev: any) {
     }
 
     const room = await store.roomByGroup(groupId);
-    const isAdmin = !!room && !!userId && room.admin_line_user_id === userId;
+    const isAdmin = !!room && await isRoomAdmin(store, room, userId);
 
     if (cmd === "/開房") {
       if (room) return void await r([text(`這個群組已經有房間「${room.name}」了。\n記分頁：${liffUrl(room)}`)]);
@@ -229,6 +262,12 @@ async function handleEvent(ev: any) {
         return void await r([standingsFlex(room, computeStandings(players, scores))]);
       }
 
+      case "/管理員": {
+        const ids = [room.admin_line_user_id, ...(await store.adminsOf(room.id))];
+        const names = await Promise.all(ids.map((id) => displayName(room.line_group_id, room.id, id)));
+        return void await r([text(`👑 ${room.name} 的管理員\n${names.map((n, i) => `${i === 0 ? "房主" : "管理員"}：${n}`).join("\n")}`)]);
+      }
+
       case "/最近": {
         const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
         if (!games.length) return void await r([text("還沒有任何對局。")]);
@@ -243,7 +282,7 @@ async function handleEvent(ev: any) {
       }
     }
 
-    if (["/加人", "/記", "/撤銷", "/刪房"].includes(cmd) && !isAdmin) {
+    if (["/加人", "/記", "/撤銷", "/刪房", "/設管理員", "/移除管理員"].includes(cmd) && !isAdmin) {
       return void await r([text("只有管理員可以操作這個指令。")]);
     }
 
@@ -274,6 +313,35 @@ async function handleEvent(ev: any) {
       case "/撤銷": {
         const ok = await store.deleteLastGame(room.id);
         return void await r([text(ok ? "↩️ 已刪除最後一場。" : "沒有可以撤銷的對局。")]);
+      }
+
+      case "/設管理員":
+      case "/移除管理員": {
+        const targets = await resolveTargets(ev, room);
+        if (!targets.length) {
+          return void await r([text(
+            `用法：${cmd} @某人（在群組裡用 @ 標記他）\n` +
+              `或是對方先在記分頁「認領」自己的名字，再輸入：${cmd} 名字`,
+          )]);
+        }
+        const done: string[] = [];
+        const skipped: string[] = [];
+        for (const t of targets) {
+          const name = await displayName(room.line_group_id, room.id, t);
+          if (cmd === "/設管理員") {
+            if (t === room.admin_line_user_id || (await store.adminsOf(room.id)).includes(t)) skipped.push(`${name}（已經是管理員）`);
+            else { await store.addAdmin(room.id, t, userId!); done.push(name); }
+          } else {
+            if (t === room.admin_line_user_id) skipped.push(`${name}（房主不能移除）`);
+            else if (await store.removeAdmin(room.id, t)) done.push(name);
+            else skipped.push(`${name}（本來就不是管理員）`);
+          }
+        }
+        const verb = cmd === "/設管理員" ? "設為管理員" : "移除管理員";
+        return void await r([text([
+          done.length ? `✅ 已${verb}：${done.join("、")}` : "",
+          skipped.length ? `略過：${skipped.join("、")}` : "",
+        ].filter(Boolean).join("\n"))]);
       }
 
       case "/刪房": {
@@ -322,7 +390,7 @@ async function handleApi(req: Request, route: string) {
   const code = String(body.code ?? url.searchParams.get("code") ?? "");
   const room = code ? await store.roomByCode(code) : null;
   if (!room) throw new HttpError(404, "找不到這個房間");
-  const isAdmin = room.admin_line_user_id === me.userId;
+  const isAdmin = await isRoomAdmin(store, room, me.userId);
   const requireAdmin = () => { if (!isAdmin) throw new HttpError(403, "只有管理員可以操作"); };
 
   if (route === "room" && req.method === "GET") {

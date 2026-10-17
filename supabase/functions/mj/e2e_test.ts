@@ -26,10 +26,13 @@ const lastText = () => {
 };
 
 const GROUP = "Cgroup1", ADMIN = "Uadmin", OTHER = "Uother";
-async function say(user: string, msg: string) {
+async function say(user: string, msg: string, mentionUserIds: string[] = []) {
   const body = JSON.stringify({ events: [{
     type: "message", replyToken: "rt", source: { type: "group", groupId: GROUP, userId: user },
-    message: { type: "text", text: msg },
+    message: {
+      type: "text", text: msg,
+      ...(mentionUserIds.length ? { mention: { mentionees: mentionUserIds.map((id) => ({ type: "user", userId: id, index: 0, length: 1 })) } } : {}),
+    },
   }] });
   const res = await handler(new Request("http://x/webhook", {
     method: "POST", body, headers: { "x-line-signature": await signBody(body, "test-secret") },
@@ -87,6 +90,19 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq((await api(OTHER, "claim", { code, player_id: id("老王") })).body.error, "你已經認領過了");
   eq((await api(OTHER, `room?code=${code}`)).body.me.player, id("阿華"));
 
+  // 多位管理員：@標記 或 已認領的名字都可以
+  const THIRD = "Uthird";
+  ok((await say(OTHER, "/設管理員 @x", [THIRD])).includes("只有管理員"));
+  ok((await say(ADMIN, "/設管理員")).includes("用法"));
+  ok((await say(ADMIN, "/設管理員 阿華")).includes("已設為管理員"), "OTHER 認領了阿華，可以用名字設定");
+  ok((await say(OTHER, "/加人 新人")).includes("已加入：新人"), "新管理員可以加人");
+  eq((await api(OTHER, `room?code=${code}`)).body.me.isAdmin, true);
+  ok((await say(OTHER, "/設管理員 @x", [THIRD])).includes("已設為管理員"));
+  ok((await say(ADMIN, "/管理員")).includes("房主"));
+  ok((await say(OTHER, "/移除管理員 @x", [ADMIN])).includes("房主不能移除"));
+  ok((await say(ADMIN, "/移除管理員 @x", [THIRD])).includes("已移除管理員"));
+  ok((await say(THIRD, "/記 小明+1 阿華-1")).includes("只有管理員"));
+
   ok((await say(ADMIN, "/撤銷")).includes("已刪除最後一場"));
   const lastMsgs = sent.at(-1)!.body.messages;
   eq(lastMsgs.at(-1).quickReply.items.map((i: any) => i.action.text),
@@ -99,7 +115,7 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq(saved.games.length, 2);
 
   // 刪房：非管理員不行、要二次確認、刪完可以重開
-  ok((await say(OTHER, "/刪房 確認")).includes("只有管理員"));
+  ok((await say(THIRD, "/刪房 確認")).includes("只有管理員")); // OTHER 已是管理員，改用非管理員測
   ok((await say(ADMIN, "/刪房")).includes("確定要刪除房間「週五麻將」"));
   ok((await say(ADMIN, "/刪房 確認")).includes("已刪除房間"));
   ok((await say(ADMIN, "/戰績")).includes("還沒有房間"));
