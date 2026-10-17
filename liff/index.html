@@ -94,6 +94,13 @@
   .game { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
   .game .scores { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 14px; }
   .del { background: none; border: 0; color: var(--muted); font-size: 13px; padding: 4px; }
+  .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
+  .datefix { display: flex; gap: 6px; margin-top: 8px; }
+  .datefix input { flex: 1; height: 36px; border-radius: 10px; border: 1px solid var(--line); padding: 0 10px; font: inherit; background: #fff; color: var(--ink); }
+  .daterow label { align-self: center; flex: none; font-size: 14px; color: var(--muted); }
+  .daterow input { flex: 1; height: 40px; border-radius: 10px; border: 1px solid var(--line); padding: 0 12px; font: inherit; background: #fff; color: var(--ink); }
+  .daterow.past input { border-color: var(--warn); background: #FFF6DE; }
+  .datehint { display: none; font-size: 12px; color: var(--warn); margin-top: 4px; }
 
   /* 分析 */
   .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
@@ -140,6 +147,12 @@
       <div class="card">
         <div class="muted" style="margin-bottom:4px">輸入這一場每位玩家的得失分，沒上桌的留空。</div>
         <div id="rows"></div>
+        <div class="inline daterow" id="dateRow">
+          <label for="playDate">日期</label>
+          <input type="date" id="playDate">
+          <button class="btn small ghost" id="todayBtn" type="button">今天</button>
+        </div>
+        <div class="datehint" id="dateHint"></div>
         <div class="inline">
           <input id="note" placeholder="備註（選填，例如：第3將）" maxlength="100">
         </div>
@@ -272,8 +285,14 @@ const demo = (() => {
       if (sc.length < 2) throw new Error("至少需要兩位玩家");
       const sum = sc.reduce((a, s) => a + s.points, 0);
       if (sum !== 0) throw new Error(`分數總和必須為 0（目前 ${sum}）`);
-      const g = { id: uid(), played_at: new Date().toISOString(), note: body.note || null };
-      db.games.push(g); for (const s of sc) db.scores.push({ game_id: g.id, ...s }); save(); return { ok: true };
+      const g = { id: uid(), played_at: body.played_at || new Date().toISOString(), note: body.note || null };
+      db.games.push(g); for (const s of sc) db.scores.push({ game_id: g.id, ...s });
+      db.games.sort((a, b) => a.played_at.localeCompare(b.played_at)); save(); return { ok: true };
+    }
+    if (route === "game/date") {
+      const g = db.games.find((x) => x.id === body.game_id);
+      if (!g) throw new Error("找不到這一場");
+      g.played_at = body.played_at; db.games.sort((a, b) => a.played_at.localeCompare(b.played_at)); save(); return { ok: true };
     }
     if (route === "game/delete") {
       db.games = db.games.filter((g) => g.id !== body.game_id);
@@ -398,6 +417,7 @@ function renderClaim() {
 
 function renderRows() {
   if (!data.me.isAdmin) return;
+  syncDateRow();
   for (const p of data.players) entry[p.id] ??= { sign: 1, value: "" };
   $("#rows").innerHTML = data.players.length ? data.players.map((p) => `
     <div class="row" data-id="${p.id}">
@@ -450,10 +470,38 @@ $("#fillBtn").onclick = () => {
   renderRows();
 };
 
+// ---------- 日期 ----------
+const pad2 = (n) => String(n).padStart(2, "0");
+const ymd = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const todayStr = () => ymd(new Date());
+/** 選定的日期＋某個時刻（保留時分秒，同一天補記多場時順序才不會亂） */
+function dateWithTime(dateStr, timeFrom = new Date()) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const t = new Date(timeFrom);
+  t.setFullYear(y, m - 1, d);
+  return t.toISOString();
+}
+function syncDateRow() {
+  const el = $("#playDate");
+  el.max = todayStr();
+  if (!el.value) el.value = todayStr();
+  const past = el.value !== todayStr();
+  $("#dateRow").classList.toggle("past", past);
+  $("#dateHint").textContent = past ? `會記在 ${el.value.replaceAll("-", "/")}，不是今天` : "";
+  $("#dateHint").style.display = past ? "block" : "none";
+}
+$("#playDate").onchange = syncDateRow;
+$("#todayBtn").onclick = () => { $("#playDate").value = todayStr(); syncDateRow(); };
+
 $("#saveBtn").onclick = async () => {
   const btn = $("#saveBtn"); btn.disabled = true;
   try {
-    await post("game", { scores: currentScores(), note: $("#note").value.trim() });
+    const d = $("#playDate").value || todayStr();
+    if (d > todayStr()) throw new Error("日期不能是未來");
+    await post("game", {
+      scores: currentScores(), note: $("#note").value.trim(),
+      ...(d !== todayStr() ? { played_at: dateWithTime(d) } : {}),
+    });
     for (const k in entry) entry[k] = { sign: 1, value: "" };
     $("#note").value = "";
     toast(DEMO ? "已記錄" : "已記錄，並通知群組");
@@ -675,9 +723,30 @@ function renderHistory() {
           ${g.note ? `<span class="muted">・${esc(g.note)}</span>` : ""}</div>
         <div class="scores">${g.scores.map((s) => `<span>${esc(s.name)} <b class="num ${cls(s.points)}">${signed(s.points)}</b></span>`).join("")}</div>
       </div>
-      ${me.isAdmin ? `<button class="del" data-id="${g.id}">刪除</button>` : ""}
+      ${me.isAdmin ? `<div class="acts">
+        <button class="del redate" data-id="${g.id}" data-at="${g.played_at}">改日期</button>
+        <button class="del" data-id="${g.id}">刪除</button>
+      </div>` : ""}
     </div>`).join("") : `<div class="empty">還沒有任何對局</div>`;
-  $("#history").querySelectorAll(".del").forEach((b) => b.onclick = async () => {
+  $("#history").querySelectorAll(".redate").forEach((b) => b.onclick = () => {
+    const card = b.closest(".game");
+    if (card.querySelector(".datefix")) return;
+    const box = document.createElement("div");
+    box.className = "datefix";
+    box.innerHTML = `<input type="date" max="${todayStr()}" value="${ymd(new Date(b.dataset.at))}" aria-label="新的日期">
+      <button class="btn small">儲存</button><button class="btn small ghost">取消</button>`;
+    card.firstElementChild.appendChild(box);
+    const [input, save, cancel] = box.children;
+    cancel.onclick = () => box.remove();
+    save.onclick = async () => {
+      if (!input.value || input.value > todayStr()) return toast("請選今天或以前的日期");
+      try {
+        await post("game/date", { game_id: b.dataset.id, played_at: dateWithTime(input.value, b.dataset.at) });
+        toast("已改日期"); await load();
+      } catch (e) { toast(e.message); }
+    };
+  });
+  $("#history").querySelectorAll(".del:not(.redate)").forEach((b) => b.onclick = async () => {
     if (!confirm("確定刪除這一場？")) return;
     try { await post("game/delete", { game_id: b.dataset.id }); toast("已刪除"); await load(); }
     catch (e) { toast(e.message); }

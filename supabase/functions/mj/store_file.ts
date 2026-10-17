@@ -148,11 +148,11 @@ export class FileStore implements Store {
     });
   }
 
-  recordGame(roomId: string, by: string, entries: { player_id: string; points: number }[], note: string) {
+  recordGame(roomId: string, by: string, entries: { player_id: string; points: number }[], note: string, playedAt?: string) {
     return this.run(() => {
       checkGame(entries, new Set(this.data.players.filter((p) => p.room_id === roomId).map((p) => p.id)));
       const id = crypto.randomUUID();
-      this.data.games.push({ id, room_id: roomId, created_by: by, note: note || null, played_at: new Date().toISOString() });
+      this.data.games.push({ id, room_id: roomId, created_by: by, note: note || null, played_at: playedAt ?? new Date().toISOString() });
       for (const e of entries) this.data.scores.push({ game_id: id, player_id: e.player_id, points: e.points });
       return id;
     }, true);
@@ -163,6 +163,14 @@ export class FileStore implements Store {
       const before = this.data.games.length;
       this.data.games = this.data.games.filter((g) => !(g.id === gameId && g.room_id === roomId));
       if (this.data.games.length !== before) this.data.scores = this.data.scores.filter((s) => s.game_id !== gameId);
+    }, true);
+  }
+
+  setGameDate(roomId: string, gameId: string, playedAt: string) {
+    return this.run(() => {
+      const g = this.data.games.find((x) => x.id === gameId && x.room_id === roomId);
+      if (g) g.played_at = playedAt;
+      return !!g;
     }, true);
   }
 

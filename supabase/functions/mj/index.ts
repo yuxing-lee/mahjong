@@ -6,6 +6,7 @@
 //   GET  api/analysis?code=&player=  ← 個人分析
 //   POST api/game         ← 管理員記一場
 //   POST api/game/delete  ← 管理員刪一場
+//   POST api/game/date    ← 管理員改某場的日期
 //   POST api/player       ← 管理員加玩家
 //   POST api/claim        ← 玩家認領自己的名字
 //
@@ -22,7 +23,7 @@ import {
   type Analysis, computeAnalysis, computeStandings, cumulativeSeries, formatGameLine, makeRoomCode,
   parseScoreText, signed, type Standing, validateEntries,
 } from "./logic.ts";
-import { isRoomAdmin, makeStore, type Room, UserError } from "./store.ts";
+import { isRoomAdmin, makeStore, parsePlayedAt, type Room, UserError } from "./store.ts";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const store = await makeStore();
@@ -201,8 +202,16 @@ function analysisText(a: Analysis, room: Room) {
   return lines.join("\n");
 }
 
-function gameResultText(room: Room, entries: { name: string; points: number }[], gameNo: number) {
-  return `🀄 ${room.name}｜第 ${gameNo} 場\n${formatGameLine(entries)}`;
+/** 台灣時間的 M/D */
+function mdTaipei(iso: string) {
+  const d = new Date(new Date(iso).getTime() + 8 * 3600e3);
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+function gameResultText(room: Room, entries: { name: string; points: number }[], gameNo: number, playedAt?: string) {
+  // 補記以前的牌局時，標上日期
+  const date = playedAt && mdTaipei(playedAt) !== mdTaipei(new Date().toISOString()) ? `（${mdTaipei(playedAt)}）` : "";
+  return `🀄 ${room.name}｜第 ${gameNo} 場${date}\n${formatGameLine(entries)}`;
 }
 
 const HELP = [
@@ -489,15 +498,26 @@ async function handleApi(req: Request, route: string) {
     const entries = (Array.isArray(body.scores) ? body.scores : [])
       .map((s: { player_id: unknown; points: unknown }) => ({ player_id: String(s.player_id), points: Math.trunc(Number(s.points)) }))
       .filter((s: { points: number }) => Number.isFinite(s.points));
-    await store.recordGame(room.id, me.userId, entries, String(body.note ?? "").slice(0, 100));
+    const playedAt = parsePlayedAt(body.played_at);
+    const gameId = await store.recordGame(room.id, me.userId, entries, String(body.note ?? "").slice(0, 100), playedAt);
 
     if (room.line_group_id) {
       const [players, { games }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
       const names = new Map(players.map((p) => [p.id, p.name]));
       const line = entries.map((e: { player_id: string; points: number }) => ({ name: names.get(e.player_id) ?? "?", points: e.points }));
+      // 補記的牌局依日期排序，不一定是最後一場
+      const no = games.findIndex((g) => g.id === gameId) + 1 || games.length;
       // 主動推播會計入官方帳號訊息額度；只推一則文字（累計請看 /戰績）
-      await push(room.line_group_id, [text(gameResultText(room, line, games.length))]);
+      await push(room.line_group_id, [text(gameResultText(room, line, no, playedAt))]);
     }
+    return json({ ok: true });
+  }
+
+  if (route === "game/date" && req.method === "POST") {
+    requireAdmin();
+    const playedAt = parsePlayedAt(body.played_at);
+    if (!playedAt) throw new HttpError(400, "請選擇日期");
+    if (!(await store.setGameDate(room.id, String(body.game_id), playedAt))) throw new HttpError(404, "找不到這一場");
     return json({ ok: true });
   }
 

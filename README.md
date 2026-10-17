@@ -88,7 +88,7 @@ flowchart LR
 
 ### 記分頁
 
-- 管理員：記分（即時檢查總和為 0、可「補平」最後一家）、新增玩家、刪除單場
+- 管理員：記分（即時檢查總和為 0、可「補平」最後一家、**可選日期**補記以前的牌局）、新增玩家、刪除單場、**改某場的日期**（紀錄分頁的「改日期」）
 - 所有人：排行、**分析**、累計走勢圖、最近 30 場紀錄、認領自己的名字
 - 「分析」分頁：選一位玩家，看概況（勝率、場均、近 10 場、連勝）、和誰同桌最順、剋星與提款機（同桌時的平均分差）、遇到哪一桌（同桌的人完全相同才算同一組）、每月表現。同桌不到 3 場的數字會顯示成灰色
 - 網址加 `?demo=1` 進入**試玩模式**：不用登入、不連後端，資料只存在那台裝置
@@ -134,7 +134,7 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
 
 `players.is_house = true` 代表台費帳戶（目前「紅中」房的「東」）。
 
-記一場是透過資料庫函式 `record_game()`，在同一個交易裡再檢查一次「至少兩人、總和為 0、玩家屬於這個房間」。
+記一場是透過資料庫函式 `record_game_at()`（可指定日期；舊的 `record_game()` 保留未用），在同一個交易裡再檢查一次「至少兩人、總和為 0、玩家屬於這個房間」。
 
 所有表都開了 RLS 但**沒有 policy**，這是刻意的：網頁不直接連資料庫，所有讀寫都經過 Edge Function（service role）。Supabase 的安全檢查會提示「RLS Enabled No Policy」，可以忽略。
 
@@ -194,7 +194,8 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
    ├─ migrations/
    │  ├─ 001_init.sql                 rooms / players / games / scores + record_game()
    │  ├─ 002_room_admins.sql          多位管理員
-   │  └─ 003_house_player.sql         台費帳戶（players.is_house）
+   │  ├─ 003_house_player.sql         台費帳戶（players.is_house）
+   │  └─ 004_game_date.sql            record_game_at()：記分時可指定日期
    └─ functions/mj/
       ├─ index.ts                     Bot webhook + 記分頁 API
       ├─ logic.ts                     解析分數、計算戰績、個人分析（純邏輯）
@@ -211,8 +212,9 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
 | `POST webhook` | LINE webhook（用 Channel secret 驗簽章） |
 | `GET api/room?code=房號` | 記分頁讀資料 |
 | `GET api/analysis?code=房號&player=玩家ID` | 個人分析 |
-| `POST api/game` | 記一場（管理員），成功後推播到群組 |
+| `POST api/game` | 記一場（管理員，可帶 `played_at` 補記日期），成功後推播到群組 |
 | `POST api/game/delete` | 刪一場（管理員） |
+| `POST api/game/date` | 改某場的日期（管理員） |
 | `POST api/player` | 加玩家（管理員） |
 | `POST api/claim` | 認領名字 |
 | `GET health` | 健康檢查 |

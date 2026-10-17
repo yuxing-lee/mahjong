@@ -109,10 +109,11 @@ export class SupabaseStore implements Store {
     return { games: games ?? [], scores };
   }
 
-  async recordGame(roomId: string, by: string, entries: { player_id: string; points: number }[], note: string) {
-    // 檢查在資料庫的 record_game() 裡做（同一個 transaction）
-    const { data, error } = await this.db.rpc("record_game", {
+  async recordGame(roomId: string, by: string, entries: { player_id: string; points: number }[], note: string, playedAt?: string) {
+    // 檢查在資料庫的 record_game_at() 裡做（同一個 transaction）
+    const { data, error } = await this.db.rpc("record_game_at", {
       p_room_id: roomId, p_created_by: by, p_note: note, p_scores: entries,
+      ...(playedAt ? { p_played_at: playedAt } : {}),
     });
     if (error) throw new UserError(error.message);
     return data as string;
@@ -121,6 +122,13 @@ export class SupabaseStore implements Store {
   async deleteGame(roomId: string, gameId: string) {
     const { error } = await this.db.from("games").delete().eq("id", gameId).eq("room_id", roomId);
     if (error) throw error;
+  }
+
+  async setGameDate(roomId: string, gameId: string, playedAt: string) {
+    const { data, error } = await this.db.from("games").update({ played_at: playedAt })
+      .eq("id", gameId).eq("room_id", roomId).select("id");
+    if (error) throw error;
+    return (data ?? []).length > 0;
   }
 
   async deleteLastGame(roomId: string) {

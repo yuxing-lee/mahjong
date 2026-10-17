@@ -101,6 +101,21 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   ok(an.body.partners.length > 0 && an.body.minPairGames === 3);
   eq((await api(OTHER, `analysis?code=${code}&player=nope`)).status, 404);
 
+  // 補記日期：記在過去、推播標日期、排序在前面；可以改日期；不能是未來
+  const past = "2026-01-15T13:00:00.000Z";
+  eq((await api(ADMIN, "game", { code, scores: [{ player_id: id("小明"), points: 7 }, { player_id: id("阿華"), points: -7 }], played_at: past })).status, 200);
+  ok(JSON.stringify(sent.filter((s) => s.kind === "push").at(-1)!.body).includes("第 1 場（1/15）"), "補記的場次依日期排在第 1 場並標日期");
+  let rm = (await api(ADMIN, `room?code=${code}`)).body;
+  const backdated = rm.recent.find((g: any) => g.played_at === past);
+  eq(backdated.no, 1);
+  eq((await api(ADMIN, "game", { code, scores: [{ player_id: id("小明"), points: 1 }, { player_id: id("阿華"), points: -1 }], played_at: "2999-01-01" })).body.error, "日期不能是未來");
+  eq((await api(OTHER, "game/date", { code, game_id: backdated.id, played_at: "2026-02-01T00:00:00Z" })).status, 403);
+  eq((await api(ADMIN, "game/date", { code, game_id: backdated.id, played_at: "2026-02-01T00:00:00Z" })).status, 200);
+  rm = (await api(ADMIN, `room?code=${code}`)).body;
+  eq(rm.recent.find((g: any) => g.id === backdated.id).played_at, "2026-02-01T00:00:00.000Z");
+  eq((await api(ADMIN, "game/date", { code, game_id: "nope", played_at: "2026-02-01T00:00:00Z" })).status, 404);
+  eq((await api(ADMIN, "game/delete", { code, game_id: backdated.id })).status, 200);
+
   // 台費帳戶
   ok((await say(OTHER, "/設台費 阿美")).includes("只有管理員")); // OTHER 此時還不是管理員
   ok((await say(ADMIN, "/設台費")).includes("目前的台費帳戶：沒有"));
