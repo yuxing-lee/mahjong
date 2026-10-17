@@ -1,0 +1,6 @@
+# Supabase CLI 設定（只放這個專案需要的部分）
+project_id = "majong-line"
+
+[functions.mj]
+# webhook 用 LINE 簽章驗證、API 用 LINE ID token 驗證，所以不能開 Supabase 的 JWT 檢查
+verify_jwt = false
