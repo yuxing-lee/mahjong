@@ -90,6 +90,16 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   eq((await api(OTHER, "claim", { code, player_id: id("老王") })).body.error, "你已經認領過了");
   eq((await api(OTHER, `room?code=${code}`)).body.me.player, id("阿華"));
 
+  // 分析：群組指令 + API
+  ok((await say(ADMIN, "/分析 小明")).includes("小明 的分析"));
+  ok((await say(ADMIN, "/分析 路人")).includes("找不到玩家"));
+  ok((await say(ADMIN, "/分析")).includes("用法"), "管理員沒認領名字時要提示");
+  const an = await api(OTHER, `analysis?code=${code}&player=${id("小明")}`);
+  eq(an.status, 200);
+  eq(an.body.name, "小明");
+  ok(an.body.partners.length > 0 && an.body.minPairGames === 3);
+  eq((await api(OTHER, `analysis?code=${code}&player=nope`)).status, 404);
+
   // 多位管理員：@標記 或 已認領的名字都可以
   const THIRD = "Uthird";
   ok((await say(OTHER, "/設管理員 @x", [THIRD])).includes("只有管理員"));
@@ -106,7 +116,7 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   ok((await say(ADMIN, "/撤銷")).includes("已刪除最後一場"));
   const lastMsgs = sent.at(-1)!.body.messages;
   eq(lastMsgs.at(-1).quickReply.items.map((i: any) => i.action.text),
-    ["/戰績", "/最近", "/記分頁", "/撤銷", "/說明"], "回覆的最後一則要帶快速回覆按鈕");
+    ["/戰績", "/最近", "/分析", "/記分頁", "/撤銷", "/說明"], "回覆的最後一則要帶快速回覆按鈕");
   eq((await api(ADMIN, `room?code=${code}`)).body.totalGames, 2);
 
   // 資料真的寫進檔案

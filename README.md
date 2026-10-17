@@ -71,6 +71,7 @@ flowchart LR
 | `/記 小明+100 阿華-30 老王-70` | 管理員 | 記一場，總和必須是 0（也接受「小明 100 阿華 -30」和全形數字） |
 | `/戰績` | 所有人 | 排行榜卡片（附「開啟記分頁」按鈕） |
 | `/最近` | 所有人 | 最近 5 場 |
+| `/分析 名字` | 所有人 | 個人摘要：勝率、近 10 場、最順的同桌、剋星、提款機（不打名字＝看自己，需先認領） |
 | `/撤銷` | 管理員 | 刪最後一場 |
 | `/刪房` | 管理員 | 刪除房間和所有紀錄（會先要求 `/刪房 確認`） |
 | `/設管理員 @某人` | 管理員 | 設成管理員（也可以用已認領的名字：`/設管理員 阿華`） |
@@ -86,7 +87,8 @@ flowchart LR
 ### 記分頁
 
 - 管理員：記分（即時檢查總和為 0、可「補平」最後一家）、新增玩家、刪除單場
-- 所有人：排行、累計走勢圖、最近 30 場紀錄、認領自己的名字
+- 所有人：排行、**分析**、累計走勢圖、最近 30 場紀錄、認領自己的名字
+- 「分析」分頁：選一位玩家，看概況（勝率、場均、近 10 場、連勝）、和誰同桌最順、剋星與提款機（同桌時的平均分差）、遇到哪一桌（同桌的人完全相同才算同一組）、每月表現。同桌不到 3 場的數字會顯示成灰色
 - 網址加 `?demo=1` 進入**試玩模式**：不用登入、不連後端，資料只存在那台裝置
 
 ---
@@ -190,7 +192,7 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
    │  └─ 002_room_admins.sql          多位管理員
    └─ functions/mj/
       ├─ index.ts                     Bot webhook + 記分頁 API
-      ├─ logic.ts                     解析分數、計算戰績（純邏輯）
+      ├─ logic.ts                     解析分數、計算戰績、個人分析（純邏輯）
       ├─ store.ts                     儲存介面；在 Supabase 上自動用資料庫，本機預設用 JSON 檔
       ├─ store_supabase.ts            Supabase 實作
       ├─ store_file.ts                JSON 檔實作（本機測試用）
@@ -203,6 +205,7 @@ npx supabase functions deploy mj --project-ref hofjzjhqizukceosjufr
 |---|---|
 | `POST webhook` | LINE webhook（用 Channel secret 驗簽章） |
 | `GET api/room?code=房號` | 記分頁讀資料 |
+| `GET api/analysis?code=房號&player=玩家ID` | 個人分析 |
 | `POST api/game` | 記一場（管理員），成功後推播到群組 |
 | `POST api/game/delete` | 刪一場（管理員） |
 | `POST api/player` | 加玩家（管理員） |
@@ -238,6 +241,7 @@ cloudflared tunnel --url http://localhost:8000   # LINE 需要 HTTPS
 
 ## 之後可以加的功能
 - 一場拆成多將、底台設定、自動換算
-- 月度排行、兩人對戰勝率
+- 記錄胡牌／放槍／自摸／莊家，做「誰放槍給誰」的分析
+- 打法風格：穩定度、大勝大敗比例
 - 匯出 CSV
 - 私訊 Bot 也能記分

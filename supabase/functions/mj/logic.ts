@@ -128,3 +128,154 @@ export function formatGameLine(entries: { name: string; points: number }[]): str
     .map((e) => `${e.name} ${signed(e.points)}`)
     .join("｜");
 }
+
+// ───────────────────────── 個人分析 ─────────────────────────
+
+export type PartnerStat = {
+  player_id: string; name: string;
+  games: number; wins: number; winRate: number; avg: number; total: number;
+};
+export type RivalStat = {
+  player_id: string; name: string;
+  games: number;
+  /** 同桌時「我 - 對方」的平均分差；正數代表我比較好 */
+  avgDiff: number;
+  /** 同桌時我分數比對方高的比例 */
+  aheadRate: number;
+};
+export type TableStat = {
+  player_ids: string[]; names: string[];
+  games: number; wins: number; winRate: number; avg: number; total: number;
+};
+export type MonthStat = { month: string; games: number; wins: number; total: number; avg: number };
+export type GameRef = { game_id: string; played_at: string; points: number };
+
+export type Analysis = {
+  player_id: string; name: string;
+  games: number; wins: number; winRate: number; total: number; avg: number;
+  last10Avg: number; last10Games: number;
+  /** 正數＝目前連勝幾場、負數＝目前連敗幾場、0＝沒有連續 */
+  streak: number;
+  longestWinStreak: number;
+  best: GameRef | null; worst: GameRef | null;
+  partners: PartnerStat[];
+  rivals: RivalStat[];
+  tables: TableStat[];
+  months: MonthStat[];
+};
+
+const round1 = (n: number) => Math.round(n * 10) / 10;
+
+/** 以台灣時間（UTC+8）算月份 */
+export function monthOf(iso: string): string {
+  const d = new Date(new Date(iso).getTime() + 8 * 3600e3);
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+}
+
+/**
+ * 以某位玩家為主角的分析。games 需由舊到新。
+ * 「贏」的定義和排行一致：該場得分 > 0。
+ */
+export function computeAnalysis(playerId: string, players: Player[], games: Game[], scores: Score[]): Analysis | null {
+  const me = players.find((p) => p.id === playerId);
+  if (!me) return null;
+  const nameOf = new Map(players.map((p) => [p.id, p.name]));
+  const byGame = new Map<string, Map<string, number>>();
+  for (const s of scores) {
+    if (!byGame.has(s.game_id)) byGame.set(s.game_id, new Map());
+    byGame.get(s.game_id)!.set(s.player_id, s.points);
+  }
+
+  const mine: { game: Game; points: number; others: Map<string, number> }[] = [];
+  for (const g of games) {
+    const gm = byGame.get(g.id);
+    if (!gm || !gm.has(playerId)) continue;
+    const others = new Map([...gm].filter(([id]) => id !== playerId));
+    mine.push({ game: g, points: gm.get(playerId)!, others });
+  }
+
+  const pts = mine.map((m) => m.points);
+  const wins = pts.filter((p) => p > 0).length;
+  const total = pts.reduce((a, b) => a + b, 0);
+  const last10 = pts.slice(-10);
+
+  // 連勝 / 連敗
+  let streak = 0;
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i];
+    if (p === 0) break;
+    if (streak === 0) streak = p > 0 ? 1 : -1;
+    else if ((p > 0) === (streak > 0)) streak += streak > 0 ? 1 : -1;
+    else break;
+  }
+  let longestWinStreak = 0, run = 0;
+  for (const p of pts) { run = p > 0 ? run + 1 : 0; longestWinStreak = Math.max(longestWinStreak, run); }
+
+  let best: GameRef | null = null, worst: GameRef | null = null;
+  for (const m of mine) {
+    const ref = { game_id: m.game.id, played_at: m.game.played_at, points: m.points };
+    if (!best || m.points > best.points) best = ref;
+    if (!worst || m.points < worst.points) worst = ref;
+  }
+
+  // 同桌夥伴、對手
+  const pAgg = new Map<string, { games: number; wins: number; total: number; diff: number; ahead: number }>();
+  for (const m of mine) {
+    for (const [oid, opts] of m.others) {
+      const a = pAgg.get(oid) ?? { games: 0, wins: 0, total: 0, diff: 0, ahead: 0 };
+      a.games += 1;
+      if (m.points > 0) a.wins += 1;
+      a.total += m.points;
+      a.diff += m.points - opts;
+      if (m.points > opts) a.ahead += 1;
+      pAgg.set(oid, a);
+    }
+  }
+  const partners: PartnerStat[] = [...pAgg].map(([id, a]) => ({
+    player_id: id, name: nameOf.get(id) ?? "?",
+    games: a.games, wins: a.wins, winRate: a.wins / a.games, avg: round1(a.total / a.games), total: a.total,
+  })).sort((x, y) => y.winRate - x.winRate || y.avg - x.avg || y.games - x.games);
+  const rivals: RivalStat[] = [...pAgg].map(([id, a]) => ({
+    player_id: id, name: nameOf.get(id) ?? "?",
+    games: a.games, avgDiff: round1(a.diff / a.games), aheadRate: a.ahead / a.games,
+  })).sort((x, y) => y.avgDiff - x.avgDiff || y.games - x.games);
+
+  // 整桌組合（同桌的其他人完全相同才算同一組）
+  const tAgg = new Map<string, { ids: string[]; games: number; wins: number; total: number }>();
+  for (const m of mine) {
+    const ids = [...m.others.keys()].sort();
+    const key = ids.join(",");
+    const a = tAgg.get(key) ?? { ids, games: 0, wins: 0, total: 0 };
+    a.games += 1;
+    if (m.points > 0) a.wins += 1;
+    a.total += m.points;
+    tAgg.set(key, a);
+  }
+  const tables: TableStat[] = [...tAgg.values()].map((a) => ({
+    player_ids: a.ids, names: a.ids.map((id) => nameOf.get(id) ?? "?"),
+    games: a.games, wins: a.wins, winRate: a.wins / a.games, avg: round1(a.total / a.games), total: a.total,
+  })).sort((x, y) => y.games - x.games || y.winRate - x.winRate);
+
+  // 每月
+  const mAgg = new Map<string, MonthStat>();
+  for (const m of mine) {
+    const key = monthOf(m.game.played_at);
+    const a = mAgg.get(key) ?? { month: key, games: 0, wins: 0, total: 0, avg: 0 };
+    a.games += 1;
+    if (m.points > 0) a.wins += 1;
+    a.total += m.points;
+    mAgg.set(key, a);
+  }
+  const months = [...mAgg.values()].map((a) => ({ ...a, avg: round1(a.total / a.games) }))
+    .sort((x, y) => y.month.localeCompare(x.month));
+
+  return {
+    player_id: me.id, name: me.name,
+    games: pts.length, wins, winRate: pts.length ? wins / pts.length : 0, total,
+    avg: pts.length ? round1(total / pts.length) : 0,
+    last10Avg: last10.length ? round1(last10.reduce((a, b) => a + b, 0) / last10.length) : 0,
+    last10Games: last10.length,
+    streak, longestWinStreak, best, worst,
+    partners, rivals, tables, months,
+  };
+}

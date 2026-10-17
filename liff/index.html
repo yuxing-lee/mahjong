@@ -95,6 +95,26 @@
   .game .scores { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 14px; }
   .del { background: none; border: 0; color: var(--muted); font-size: 13px; padding: 4px; }
 
+  /* 分析 */
+  .kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px; }
+  .kpi { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+  .kpi .k { font-size: 12px; color: var(--muted); }
+  .kpi .v { font: 700 20px var(--mono); font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .kpi .s { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .card h3 { margin: 0 0 4px; font-size: 15px; }
+  .card h3 + .muted { margin-bottom: 8px; }
+  table.t { width: 100%; border-collapse: collapse; font-size: 14px; }
+  table.t th { font-weight: 500; font-size: 12px; color: var(--muted); text-align: right; padding: 4px 0 6px; }
+  table.t th:first-child, table.t td:first-child { text-align: left; }
+  table.t td { padding: 7px 0; border-top: 1px solid var(--line); text-align: right; }
+  table.t td:first-child { max-width: 46vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  table.t tr.few td { color: var(--muted); }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 99px; margin-left: 4px;
+    background: var(--bg); color: var(--muted); vertical-align: 1px; }
+  .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+  .facts dt { color: var(--muted); } .facts dd { margin: 0; }
+  .linkbtn { background: none; border: 0; padding: 6px 0 0; color: var(--felt); font: inherit; font-size: 13px; }
+
   .banner { background: #FFF6DE; border-color: #F0DDA6; }
   .empty { text-align: center; padding: 36px 12px; color: var(--muted); }
   .toast { position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 20;
@@ -134,6 +154,14 @@
     </section>
 
     <section id="tab-rank"><div class="card" id="rankList"></div></section>
+
+    <section id="tab-analysis">
+      <div class="card">
+        <div class="muted">以誰為主角？</div>
+        <div class="inline" style="margin-top:6px"><select id="anPlayer" aria-label="選擇玩家"></select></div>
+      </div>
+      <div id="anBody"></div>
+    </section>
 
     <section id="tab-trend">
       <div class="card" style="height:300px"><canvas id="chart"></canvas></div>
@@ -256,6 +284,12 @@ const demo = (() => {
       if (db.players.some((p) => p.name === n)) throw new Error("這個名字已經存在");
       db.players.push({ id: uid(), name: n, line_user_id: null }); save(); return { ok: true };
     }
+    if (route === "analysis") {
+      const pid = new URLSearchParams(path.split("?")[1] || "").get("player");
+      const a = analyzeLocal(pid, db.players, db.games, db.scores);
+      if (!a) throw new Error("找不到這位玩家");
+      return { ...a, minPairGames: 3 };
+    }
     if (route === "claim") {
       const p = db.players.find((x) => x.id === body.player_id);
       if (!p || p.line_user_id) throw new Error("這個名字已經被認領");
@@ -313,6 +347,7 @@ async function boot() {
 
 async function load() {
   data = await api(`room?code=${encodeURIComponent(roomCode)}`);
+  anCache.clear();
   render();
 }
 
@@ -327,7 +362,7 @@ function render() {
 
   const tabs = [
     ...(me.isAdmin ? [["record", "記分"]] : []),
-    ["rank", "排行"], ["trend", "走勢"], ["history", "紀錄"],
+    ["rank", "排行"], ["analysis", "分析"], ["trend", "走勢"], ["history", "紀錄"],
   ];
   if (!currentTab || !tabs.some(([k]) => k === currentTab)) currentTab = tabs[0][0];
   $("#tabs").innerHTML = tabs.map(([k, label]) =>
@@ -338,6 +373,7 @@ function render() {
 
   renderClaim(); renderRows(); renderRank(); renderHistory();
   if (currentTab === "trend") renderChart();
+  if (currentTab === "analysis") renderAnalysis();
 }
 
 function renderClaim() {
@@ -442,6 +478,156 @@ function renderRank() {
       </div>
       <div class="total ${cls(s.total)}">${signed(s.total)}</div>
     </div>`).join("") : `<div class="empty">還沒有任何對局</div>`;
+}
+
+// ---------- 分析 ----------
+let anPlayerId = null;
+let anShowAllTables = false;
+const anCache = new Map(); // player_id -> analysis（資料更新時清掉）
+
+function renderAnalysis() {
+  const sel = $("#anPlayer");
+  const list = data.standings.filter((s) => s.games > 0);
+  if (!list.length) { sel.innerHTML = ""; $("#anBody").innerHTML = `<div class="card empty">還沒有任何對局</div>`; return; }
+  if (!anPlayerId || !list.some((s) => s.player_id === anPlayerId)) {
+    anPlayerId = (data.me.player && list.some((s) => s.player_id === data.me.player)) ? data.me.player : list[0].player_id;
+  }
+  sel.innerHTML = list.map((s) => `<option value="${s.player_id}" ${s.player_id === anPlayerId ? "selected" : ""}>${esc(s.name)}${s.player_id === data.me.player ? "（我）" : ""}</option>`).join("");
+  sel.onchange = () => { anPlayerId = sel.value; anShowAllTables = false; renderAnalysis(); };
+  const cached = anCache.get(anPlayerId);
+  if (cached) return drawAnalysis(cached);
+  $("#anBody").innerHTML = `<div class="card empty">計算中…</div>`;
+  const want = anPlayerId;
+  api(`analysis?code=${encodeURIComponent(roomCode)}&player=${encodeURIComponent(want)}`)
+    .then((a) => { anCache.set(want, a); if (want === anPlayerId && currentTab === "analysis") drawAnalysis(a); })
+    .catch((e) => { $("#anBody").innerHTML = `<div class="card empty">${esc(e.message)}</div>`; });
+}
+
+function drawAnalysis(a) {
+  const min = a.minPairGames || 3;
+  const pctS = (r) => `${Math.round(r * 100)}%`;
+  const day = (iso) => new Date(iso).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+  const streak = a.streak > 0 ? `<span class="pos">連勝 ${a.streak}</span>` : a.streak < 0 ? `<span class="neg">連敗 ${-a.streak}</span>` : "—";
+  const kpi = (k, v, sub = "") => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+
+  const kpis = `<div class="kpis">
+    ${kpi("場數", a.games)}
+    ${kpi("勝率", pctS(a.winRate), `${a.wins} 勝`)}
+    ${kpi("場均", `<span class="${cls(a.avg)}">${signed(a.avg)}</span>`)}
+    ${kpi("累計", `<span class="${cls(a.total)}">${signed(a.total)}</span>`)}
+    ${kpi(`近 ${a.last10Games} 場場均`, `<span class="${cls(a.last10Avg)}">${signed(a.last10Avg)}</span>`,
+      a.last10Avg > a.avg ? "比平常好" : a.last10Avg < a.avg ? "比平常差" : "")}
+    ${kpi("目前", streak, `最長連勝 ${a.longestWinStreak}`)}
+  </div>`;
+
+  const facts = `<div class="card"><dl class="facts">
+    <dt>最好的一場</dt><dd>${a.best ? `<b class="num ${cls(a.best.points)}">${signed(a.best.points)}</b>　<span class="muted">${day(a.best.played_at)}</span>` : "—"}</dd>
+    <dt>最慘的一場</dt><dd>${a.worst ? `<b class="num ${cls(a.worst.points)}">${signed(a.worst.points)}</b>　<span class="muted">${day(a.worst.played_at)}</span>` : "—"}</dd>
+  </dl></div>`;
+
+  const partnerRows = a.partners.map((p) => `<tr class="${p.games < min ? "few" : ""}">
+      <td>${esc(p.name)}</td><td class="num">${p.games}</td><td class="num">${pctS(p.winRate)}</td>
+      <td class="num ${p.games < min ? "" : cls(p.avg)}">${signed(p.avg)}</td></tr>`).join("");
+  const partners = `<div class="card">
+    <h3>🤝 和誰同桌最順</h3>
+    <div class="muted">${esc(a.name)} 跟這個人同桌時的表現。灰字是同桌不到 ${min} 場，參考就好。</div>
+    ${a.partners.length ? `<table class="t"><tr><th>同桌對象</th><th>場數</th><th>勝率</th><th>場均</th></tr>${partnerRows}</table>` : `<div class="muted">沒有同桌紀錄</div>`}
+  </div>`;
+
+  const solid = a.rivals.filter((r) => r.games >= min);
+  const nemesis = solid.length && solid[solid.length - 1].avgDiff < 0 ? solid[solid.length - 1] : null;
+  const atm = solid.length && solid[0].avgDiff > 0 ? solid[0] : null;
+  const rivalRows = a.rivals.map((r) => `<tr class="${r.games < min ? "few" : ""}">
+      <td>${esc(r.name)}${r === nemesis ? `<span class="tag">剋星</span>` : ""}${r === atm ? `<span class="tag">提款機</span>` : ""}</td>
+      <td class="num">${r.games}</td>
+      <td class="num ${r.games < min ? "" : cls(r.avgDiff)}">${signed(r.avgDiff)}</td>
+      <td class="num">${pctS(r.aheadRate)}</td></tr>`).join("");
+  const rivals = `<div class="card">
+    <h3>⚔️ 剋星與提款機</h3>
+    <div class="muted">同桌時 ${esc(a.name)} 比對方多拿幾分（平均），以及分數贏過對方的比例。這是同桌比較，不代表錢真的是誰給誰。</div>
+    ${a.rivals.length ? `<table class="t"><tr><th>對手</th><th>場數</th><th>平均分差</th><th>贏過他</th></tr>${rivalRows}</table>` : `<div class="muted">沒有同桌紀錄</div>`}
+  </div>`;
+
+  const solidTables = a.tables.filter((t) => t.games >= min);
+  const shownTables = anShowAllTables ? a.tables : (solidTables.length ? solidTables : a.tables.slice(0, 5));
+  const hiddenCount = a.tables.length - shownTables.length;
+  const tableRows = shownTables.map((t) => `<tr class="${t.games < min ? "few" : ""}">
+      <td title="${esc(t.names.join("、"))}">${t.names.length ? esc(t.names.join("、")) : "（只有自己）"}</td>
+      <td class="num">${t.games}</td><td class="num">${pctS(t.winRate)}</td>
+      <td class="num ${t.games < min ? "" : cls(t.avg)}">${signed(t.avg)}</td></tr>`).join("");
+  const tables = `<div class="card">
+    <h3>🀄 遇到哪一桌</h3>
+    <div class="muted">同桌的其他人完全一樣才算同一組。${solidTables.length ? `只列打滿 ${min} 場的組合。` : `還沒有組合打滿 ${min} 場，先列場數最多的幾組。`}</div>
+    ${a.tables.length ? `<table class="t"><tr><th>同桌其他人</th><th>場數</th><th>勝率</th><th>場均</th></tr>${tableRows}</table>` : `<div class="muted">沒有紀錄</div>`}
+    ${hiddenCount > 0 ? `<button class="linkbtn" id="anMoreTables">顯示全部 ${a.tables.length} 組</button>` : ""}
+  </div>`;
+
+  const monthRows = a.months.map((m) => `<tr><td class="num">${m.month}</td><td class="num">${m.games}</td>
+      <td class="num">${pctS(m.wins / m.games)}</td><td class="num ${cls(m.total)}">${signed(m.total)}</td></tr>`).join("");
+  const months = `<div class="card">
+    <h3>📅 每月</h3>
+    <table class="t"><tr><th>月份</th><th>場數</th><th>勝率</th><th>累計</th></tr>${monthRows}</table>
+  </div>`;
+
+  $("#anBody").innerHTML = kpis + facts + partners + rivals + tables + months;
+  const more = $("#anMoreTables");
+  if (more) more.onclick = () => { anShowAllTables = true; drawAnalysis(a); };
+}
+
+/** 試玩模式用：和後端 computeAnalysis 同樣的算法 */
+function analyzeLocal(pid, players, games, scores) {
+  const me = players.find((p) => p.id === pid);
+  if (!me) return null;
+  const nameOf = new Map(players.map((p) => [p.id, p.name]));
+  const r1 = (n) => Math.round(n * 10) / 10;
+  const mine = games.map((g) => {
+    const gs = scores.filter((s) => s.game_id === g.id);
+    const mineS = gs.find((s) => s.player_id === pid);
+    return mineS ? { g, points: mineS.points, others: gs.filter((s) => s.player_id !== pid) } : null;
+  }).filter(Boolean);
+  const pts = mine.map((m) => m.points);
+  const wins = pts.filter((p) => p > 0).length, total = pts.reduce((a, b) => a + b, 0), last10 = pts.slice(-10);
+  let streak = 0;
+  for (let i = pts.length - 1; i >= 0; i--) {
+    const p = pts[i]; if (p === 0) break;
+    if (!streak) streak = p > 0 ? 1 : -1; else if ((p > 0) === (streak > 0)) streak += streak > 0 ? 1 : -1; else break;
+  }
+  let longestWinStreak = 0, run = 0;
+  for (const p of pts) { run = p > 0 ? run + 1 : 0; longestWinStreak = Math.max(longestWinStreak, run); }
+  let best = null, worst = null;
+  for (const m of mine) {
+    const ref = { game_id: m.g.id, played_at: m.g.played_at, points: m.points };
+    if (!best || m.points > best.points) best = ref;
+    if (!worst || m.points < worst.points) worst = ref;
+  }
+  const pAgg = new Map(), tAgg = new Map(), mAgg = new Map();
+  for (const m of mine) {
+    for (const o of m.others) {
+      const a = pAgg.get(o.player_id) || { games: 0, wins: 0, total: 0, diff: 0, ahead: 0 };
+      a.games++; if (m.points > 0) a.wins++; a.total += m.points; a.diff += m.points - o.points; if (m.points > o.points) a.ahead++;
+      pAgg.set(o.player_id, a);
+    }
+    const ids = m.others.map((o) => o.player_id).sort(), key = ids.join(",");
+    const t = tAgg.get(key) || { ids, games: 0, wins: 0, total: 0 };
+    t.games++; if (m.points > 0) t.wins++; t.total += m.points; tAgg.set(key, t);
+    const d = new Date(new Date(m.g.played_at).getTime() + 8 * 3600e3);
+    const mk = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    const mm = mAgg.get(mk) || { month: mk, games: 0, wins: 0, total: 0, avg: 0 };
+    mm.games++; if (m.points > 0) mm.wins++; mm.total += m.points; mAgg.set(mk, mm);
+  }
+  return {
+    player_id: pid, name: me.name, games: pts.length, wins, winRate: pts.length ? wins / pts.length : 0, total,
+    avg: pts.length ? r1(total / pts.length) : 0,
+    last10Avg: last10.length ? r1(last10.reduce((a, b) => a + b, 0) / last10.length) : 0, last10Games: last10.length,
+    streak, longestWinStreak, best, worst,
+    partners: [...pAgg].map(([id, a]) => ({ player_id: id, name: nameOf.get(id) || "?", games: a.games, wins: a.wins, winRate: a.wins / a.games, avg: r1(a.total / a.games), total: a.total }))
+      .sort((x, y) => y.winRate - x.winRate || y.avg - x.avg || y.games - x.games),
+    rivals: [...pAgg].map(([id, a]) => ({ player_id: id, name: nameOf.get(id) || "?", games: a.games, avgDiff: r1(a.diff / a.games), aheadRate: a.ahead / a.games }))
+      .sort((x, y) => y.avgDiff - x.avgDiff || y.games - x.games),
+    tables: [...tAgg.values()].map((a) => ({ player_ids: a.ids, names: a.ids.map((id) => nameOf.get(id) || "?"), games: a.games, wins: a.wins, winRate: a.wins / a.games, avg: r1(a.total / a.games), total: a.total }))
+      .sort((x, y) => y.games - x.games || y.winRate - x.winRate),
+    months: [...mAgg.values()].map((a) => ({ ...a, avg: r1(a.total / a.games) })).sort((x, y) => y.month.localeCompare(x.month)),
+  };
 }
 
 const PALETTE = ["#B83A2E", "#1F5C46", "#C98A16", "#3B5BA9", "#8E44AD", "#16A085", "#D35400", "#7F8C8D", "#2C3E50", "#C0392B"];

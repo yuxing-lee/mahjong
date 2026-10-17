@@ -3,6 +3,7 @@
 // 路由（本機是 http://localhost:8000/...，Supabase 上是 .../functions/v1/mj/...）：
 //   POST webhook          ← LINE Messaging API webhook
 //   GET  api/room?code=   ← LIFF 讀取房間資料
+//   GET  api/analysis?code=&player=  ← 個人分析
 //   POST api/game         ← 管理員記一場
 //   POST api/game/delete  ← 管理員刪一場
 //   POST api/player       ← 管理員加玩家
@@ -18,7 +19,7 @@
 // 沒設定 LINE_CHANNEL_ACCESS_TOKEN 時，Bot 要送的訊息只會印在 console，方便本機測試。
 
 import {
-  computeStandings, cumulativeSeries, formatGameLine, makeRoomCode,
+  type Analysis, computeAnalysis, computeStandings, cumulativeSeries, formatGameLine, makeRoomCode,
   parseScoreText, signed, type Standing, validateEntries,
 } from "./logic.ts";
 import { isRoomAdmin, makeStore, type Room, UserError } from "./store.ts";
@@ -66,7 +67,7 @@ async function lineCall(path: string, body: unknown) {
 }
 
 // 快速回覆按鈕：出現在輸入框上方，點了就會用使用者的名義送出指令（群組也能用）
-const QUICK_COMMANDS = ["/戰績", "/最近", "/記分頁", "/撤銷", "/說明"];
+const QUICK_COMMANDS = ["/戰績", "/最近", "/分析", "/記分頁", "/撤銷", "/說明"];
 const quickReply = {
   items: QUICK_COMMANDS.map((cmd) => ({
     type: "action",
@@ -172,6 +173,34 @@ function standingsFlex(room: Room, list: Standing[], title = "目前戰績"): Me
   };
 }
 
+const pct = (r: number) => `${Math.round(r * 100)}%`;
+/** 夥伴、剋星這類「挑一個代表」的統計，至少要同桌幾場才列出 */
+const MIN_PAIR_GAMES = 3;
+
+function analysisText(a: Analysis, room: Room) {
+  if (!a.games) return `${a.name} 還沒有任何對局。`;
+  const pairs = a.partners.filter((p) => p.games >= MIN_PAIR_GAMES);
+  const rivals = a.rivals.filter((p) => p.games >= MIN_PAIR_GAMES);
+  const streak = a.streak > 0 ? `連勝 ${a.streak} 場 🔥` : a.streak < 0 ? `連敗 ${-a.streak} 場` : "—";
+  const lines = [
+    `📊 ${a.name} 的分析（${a.games} 場）`,
+    `勝率 ${pct(a.winRate)}｜場均 ${signed(a.avg)}｜累計 ${signed(a.total)}`,
+    `近 ${a.last10Games} 場場均 ${signed(a.last10Avg)}｜目前 ${streak}`,
+  ];
+  if (pairs.length) {
+    const b = pairs[0];
+    lines.push(`🤝 最順的同桌：${b.name}（${b.games} 場，勝率 ${pct(b.winRate)}，場均 ${signed(b.avg)}）`);
+  }
+  if (rivals.length) {
+    const top = rivals[0], low = rivals[rivals.length - 1];
+    if (low.avgDiff < 0) lines.push(`😈 剋星：${low.name}（同桌 ${low.games} 場，平均輸他 ${-low.avgDiff}）`);
+    if (top.avgDiff > 0 && top !== low) lines.push(`💰 提款機：${top.name}（同桌 ${top.games} 場，平均贏他 ${top.avgDiff}）`);
+  }
+  if (!pairs.length) lines.push(`（同桌滿 ${MIN_PAIR_GAMES} 場才會分析夥伴和對手）`);
+  lines.push("", `完整分析：記分頁 → 分析\n${liffUrl(room)}`);
+  return lines.join("\n");
+}
+
 function gameResultText(room: Room, entries: { name: string; points: number }[], gameNo: number) {
   return `🀄 ${room.name}｜第 ${gameNo} 場\n${formatGameLine(entries)}`;
 }
@@ -184,6 +213,7 @@ const HELP = [
   "/記 小明+100 阿華-30 老王-70　記一場（總和要是 0）",
   "/戰績　看排行榜",
   "/最近　看最近 5 場",
+  "/分析 名字　某人的勝率、最順的同桌、剋星（不打名字＝看自己）",
   "/撤銷　刪掉最後一場（管理員）",
   "/刪房　刪除這個房間和所有紀錄（管理員）",
   "/設管理員 @某人　把他設成管理員（管理員）",
@@ -266,6 +296,20 @@ async function handleEvent(ev: any) {
         const ids = [room.admin_line_user_id, ...(await store.adminsOf(room.id))];
         const names = await Promise.all(ids.map((id) => displayName(room.line_group_id, room.id, id)));
         return void await r([text(`👑 ${room.name} 的管理員\n${names.map((n, i) => `${i === 0 ? "房主" : "管理員"}：${n}`).join("\n")}`)]);
+      }
+
+      case "/分析": {
+        const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+        const name = args.replace(/^@/, "").trim();
+        const target = name
+          ? players.find((p) => p.name === name)
+          : players.find((p) => p.line_user_id && p.line_user_id === userId);
+        if (!target) {
+          return void await r([text(name
+            ? `找不到玩家「${name}」。目前玩家：${players.map((p) => p.name).join("、")}`
+            : `用法：/分析 名字\n或先到記分頁「認領」自己的名字，之後打 /分析 就會看自己的。`)]);
+        }
+        return void await r([text(analysisText(computeAnalysis(target.id, players, games, scores)!, room))]);
       }
 
       case "/最近": {
@@ -411,6 +455,13 @@ async function handleApi(req: Request, route: string) {
       recent,
       totalGames: games.length,
     });
+  }
+
+  if (route === "analysis" && req.method === "GET") {
+    const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+    const a = computeAnalysis(String(url.searchParams.get("player") ?? ""), players, games, scores);
+    if (!a) throw new HttpError(404, "找不到這位玩家");
+    return json({ ...a, minPairGames: MIN_PAIR_GAMES });
   }
 
   if (route === "game" && req.method === "POST") {
