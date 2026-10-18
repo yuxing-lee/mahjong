@@ -166,7 +166,11 @@ export type Analysis = {
   rivals: RivalStat[];
   tables: TableStat[];
   months: MonthStat[];
+  /** 最近 RECENT_GAMES 場（由舊到新），給分析頁畫長條圖 */
+  recent: GameRef[];
 };
+
+export const RECENT_GAMES = 20;
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
@@ -283,6 +287,7 @@ export function computeAnalysis(playerId: string, players: Player[], games: Game
     last10Games: last10.length,
     streak, longestWinStreak, best, worst,
     partners, rivals, tables, months,
+    recent: mine.slice(-RECENT_GAMES).map((m) => ({ game_id: m.game.id, played_at: m.game.played_at, points: m.points })),
   };
 }
 

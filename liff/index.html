@@ -141,6 +141,40 @@
   table.t tr.few td { color: var(--muted); }
   .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 99px; margin-left: 4px;
     background: var(--bg); color: var(--muted); vertical-align: 1px; }
+  .verdict { border-left: 4px solid var(--felt); }
+  .verdict .vh { font-size: 19px; font-weight: 700; line-height: 1.4; }
+  .verdict ul { list-style: none; padding: 0; margin: 10px 0 0; }
+  .verdict li { padding: 5px 0; font-size: 15px; border-top: 1px dashed var(--line); }
+  .bars { display: flex; gap: 3px; height: 110px; margin-top: 8px; }
+  .bars .b { flex: 1; display: flex; flex-direction: column; padding: 0; border: 0; background: none; min-width: 0; cursor: pointer; }
+  .bars .u, .bars .d { flex: 1; display: flex; }
+  .bars .u { align-items: flex-end; border-bottom: 1px solid var(--muted); }
+  .bars .d { align-items: flex-start; }
+  .bars i { display: block; width: 100%; min-height: 2px; }
+  .bars i.up { background: var(--win); border-radius: 3px 3px 0 0; }
+  .bars i.dn { background: var(--lose); border-radius: 0 0 3px 3px; }
+  .bars .b.sel i { outline: 2px solid var(--ink); }
+  .axis { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin: 2px 0 8px; }
+  .dlist { margin-top: 6px; }
+  .drow { display: grid; grid-template-columns: 6.5em 1fr 4.2em; gap: 10px; align-items: center; padding: 9px 0; border-top: 1px solid var(--line); }
+  summary.drow { list-style: none; cursor: pointer; }
+  summary.drow::-webkit-details-marker, .fold summary::-webkit-details-marker, details.sub summary::-webkit-details-marker { display: none; }
+  .drow .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+  .drow .nm small { display: block; font-size: 11px; color: var(--muted); }
+  .drow .val { text-align: right; font-weight: 700; font-size: 14px; }
+  .drow-wrap.few { opacity: .55; }
+  .drow-wrap .more { font-size: 13px; color: var(--muted); padding: 0 0 10px; }
+  .dbar { position: relative; height: 12px; }
+  .dbar::before { content: ""; position: absolute; left: 50%; top: -4px; bottom: -4px; width: 1px; background: var(--muted); opacity: .5; }
+  .dbar i { position: absolute; top: 0; bottom: 0; }
+  .dbar i.up { background: var(--win); border-radius: 0 4px 4px 0; }
+  .dbar i.dn { background: var(--lose); border-radius: 4px 0 0 4px; }
+  details.sub { margin-top: 6px; }
+  details.sub summary { list-style: none; }
+  .fold summary { list-style: none; display: flex; justify-content: space-between; align-items: center; cursor: pointer; }
+  .fold summary h3 { margin: 0; }
+  .fold[open] summary .muted { display: none; }
+  .fold[open] summary { margin-bottom: 6px; }
   .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
   .facts dt { color: var(--muted); } .facts dd { margin: 0; }
   .linkbtn { background: none; border: 0; padding: 6px 0 0; color: var(--felt); font: inherit; font-size: 13px; }
@@ -629,71 +663,133 @@ function drawAnalysis(a) {
   const min = a.minPairGames || 3;
   const pctS = (r) => `${Math.round(r * 100)}%`;
   const day = (iso) => new Date(iso).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
-  const streak = a.streak > 0 ? `<span class="pos">連勝 ${a.streak}</span>` : a.streak < 0 ? `<span class="neg">連敗 ${-a.streak}</span>` : "—";
+  const r0 = (n) => signed(Math.round(n));
   const kpi = (k, v, sub = "") => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+  // 長條：v 在 -max~max 之間，從中線往左（輸）或往右（贏）畫
+  const dbar = (v, max) => {
+    const w = max ? Math.min(50, Math.abs(v) / max * 50) : 0;
+    return `<div class="dbar"><i class="${v >= 0 ? "up" : "dn"}" style="${v >= 0 ? "left" : "right"}:50%;width:${w}%"></i></div>`;
+  };
 
-  const kpis = `<div class="kpis">
-    ${kpi("場數", a.games)}
-    ${kpi("勝率", pctS(a.winRate), `${a.wins} 勝`)}
-    ${kpi("場均", `<span class="${cls(a.avg)}">${signed(a.avg)}</span>`)}
-    ${kpi("累計", `<span class="${cls(a.total)}">${signed(a.total)}</span>`)}
-    ${kpi(`近 ${a.last10Games} 場場均`, `<span class="${cls(a.last10Avg)}">${signed(a.last10Avg)}</span>`,
-      a.last10Avg > a.avg ? "比平常好" : a.last10Avg < a.avg ? "比平常差" : "")}
-    ${kpi("目前", streak, `最長連勝 ${a.longestWinStreak}`)}
-  </div>`;
+  // 名次（不含台費帳戶）
+  const house = new Set(data.players.filter((p) => p.house).map((p) => p.id));
+  const ranked = data.standings.filter((s) => s.games > 0 && !house.has(s.player_id));
+  const rank = ranked.findIndex((s) => s.player_id === a.player_id) + 1;
+  const n = ranked.length;
 
-  const facts = `<div class="card"><dl class="facts">
-    <dt>最好的一場</dt><dd>${a.best ? `<b class="num ${cls(a.best.points)}">${signed(a.best.points)}</b>　<span class="muted">${day(a.best.played_at)}</span>` : "—"}</dd>
-    <dt>最慘的一場</dt><dd>${a.worst ? `<b class="num ${cls(a.worst.points)}">${signed(a.worst.points)}</b>　<span class="muted">${day(a.worst.played_at)}</span>` : "—"}</dd>
-  </dl></div>`;
-
-  const partnerRows = a.partners.map((p) => `<tr class="${p.games < min ? "few" : ""}">
-      <td>${esc(p.name)}</td><td class="num">${p.games}</td><td class="num">${pctS(p.winRate)}</td>
-      <td class="num ${p.games < min ? "" : cls(p.avg)}">${signed(p.avg)}</td></tr>`).join("");
-  const partners = `<div class="card">
-    <h3>🤝 和誰同桌最順</h3>
-    <div class="muted">${esc(a.name)} 跟這個人同桌時的表現。灰字是同桌不到 ${min} 場，參考就好。</div>
-    ${a.partners.length ? `<table class="t"><tr><th>同桌對象</th><th>場數</th><th>勝率</th><th>場均</th></tr>${partnerRows}</table>` : `<div class="muted">沒有同桌紀錄</div>`}
-  </div>`;
-
-  const solid = a.rivals.filter((r) => r.games >= min);
+  // 剋星 / 提款機：同桌滿 min 場的人裡，平均分差最低 / 最高
+  const partnerOf = new Map(a.partners.map((p) => [p.player_id, p]));
+  const opp = a.rivals.map((r) => ({ ...r, p: partnerOf.get(r.player_id) }));
+  const solid = opp.filter((r) => r.games >= min);
+  const few = opp.filter((r) => r.games < min);
   const nemesis = solid.length && solid[solid.length - 1].avgDiff < 0 ? solid[solid.length - 1] : null;
   const atm = solid.length && solid[0].avgDiff > 0 ? solid[0] : null;
-  const rivalRows = a.rivals.map((r) => `<tr class="${r.games < min ? "few" : ""}">
-      <td>${esc(r.name)}${r === nemesis ? `<span class="tag">剋星</span>` : ""}${r === atm ? `<span class="tag">提款機</span>` : ""}</td>
-      <td class="num">${r.games}</td>
-      <td class="num ${r.games < min ? "" : cls(r.avgDiff)}">${signed(r.avgDiff)}</td>
-      <td class="num">${pctS(r.aheadRate)}</td></tr>`).join("");
-  const rivals = `<div class="card">
-    <h3>⚔️ 剋星與提款機</h3>
-    <div class="muted">同桌時 ${esc(a.name)} 比對方多拿幾分（平均），以及分數贏過對方的比例。這是同桌比較，不代表錢真的是誰給誰。</div>
-    ${a.rivals.length ? `<table class="t"><tr><th>對手</th><th>場數</th><th>平均分差</th><th>贏過他</th></tr>${rivalRows}</table>` : `<div class="muted">沒有同桌紀錄</div>`}
+
+  // ── 一句話總結 ──
+  const head = a.total > 0 ? (rank === 1 ? "目前全房最大贏家 👑" : `整體贏 ${a.total}`)
+    : a.total < 0 ? (rank === n && n > 1 ? `目前全房輸最多` : `整體輸 ${-a.total}`) : "整體打平";
+  const pts = (a.recent || []).map((g) => g.points);
+  const sd = pts.length > 1 ? Math.sqrt(pts.reduce((s, p) => s + (p - a.avg) ** 2, 0) / pts.length) : 0;
+  const bullets = [];
+  if (a.games >= 10) {
+    const d = a.last10Avg - a.avg;
+    if (d > sd * 0.25) bullets.push(`🔥 最近 10 場手感變好：場均 <b class="num ${cls(a.last10Avg)}">${r0(a.last10Avg)}</b>（平常 ${r0(a.avg)}）`);
+    else if (d < -sd * 0.25) bullets.push(`❄️ 最近 10 場轉冷：場均 <b class="num ${cls(a.last10Avg)}">${r0(a.last10Avg)}</b>（平常 ${r0(a.avg)}）`);
+    else bullets.push(`➖ 最近 10 場跟平常差不多（場均 ${r0(a.last10Avg)}）`);
+  }
+  if (a.streak >= 3) bullets.push(`📈 目前連勝 <b>${a.streak}</b> 場`);
+  if (a.streak <= -3) bullets.push(`📉 目前連敗 <b>${-a.streak}</b> 場`);
+  if (nemesis) bullets.push(`😈 最怕 <b>${esc(nemesis.name)}</b>：同桌平均輸他 <b class="num neg">${Math.round(-nemesis.avgDiff)}</b>`);
+  if (atm) bullets.push(`💰 最會贏 <b>${esc(atm.name)}</b>：同桌平均贏他 <b class="num pos">${Math.round(atm.avgDiff)}</b>`);
+  if (!solid.length) bullets.push(`<span class="muted">同桌滿 ${min} 場才會分析剋星和提款機</span>`);
+  const verdict = `<div class="card verdict">
+    <div class="vh">${esc(a.name)}：<span class="${cls(a.total)}">${head}</span></div>
+    <div class="muted">${n > 1 ? `第 ${rank} 名 / ${n} 人・` : ""}共 ${a.games} 場</div>
+    ${bullets.length ? `<ul>${bullets.map((b) => `<li>${b}</li>`).join("")}</ul>` : ""}
   </div>`;
 
+  // ── 三個大數字 ──
+  const kpis = `<div class="kpis">
+    ${kpi("累計", `<span class="${cls(a.total)}">${signed(a.total)}</span>`, n > 1 ? `第 ${rank} 名` : "")}
+    ${kpi("場均", `<span class="${cls(a.avg)}">${r0(a.avg)}</span>`, `${a.games} 場`)}
+    ${kpi("勝率", pctS(a.winRate), `${a.wins} 勝 ${a.games - a.wins} 敗`)}
+  </div>`;
+
+  // ── 最近幾場的輸贏長條 ──
+  const rec = a.recent || [];
+  const maxRec = Math.max(1, ...rec.map((g) => Math.abs(g.points)));
+  const bars = rec.map((g, i) => {
+    const h = Math.abs(g.points) / maxRec * 100;
+    return `<button class="b" data-i="${i}" aria-label="${day(g.played_at)} ${signed(g.points)}">
+      <span class="u">${g.points > 0 ? `<i class="up" style="height:${h}%"></i>` : ""}</span>
+      <span class="d">${g.points < 0 ? `<i class="dn" style="height:${h}%"></i>` : ""}</span></button>`;
+  }).join("");
+  const bestWorst = `${a.best ? `最好 <b class="num ${cls(a.best.points)}">${signed(a.best.points)}</b>（${day(a.best.played_at)}）` : ""}${a.worst ? `　最慘 <b class="num ${cls(a.worst.points)}">${signed(a.worst.points)}</b>（${day(a.worst.played_at)}）` : ""}`;
+  const recent = rec.length ? `<div class="card">
+    <h3>最近 ${rec.length} 場</h3>
+    <div class="bars">${bars}</div>
+    <div class="axis"><span>較早</span><span>最近</span></div>
+    <div class="muted" id="anBarInfo">${bestWorst}<br>點長條看那一場</div>
+  </div>` : "";
+
+  // ── 對上每個人 ──
+  const maxOpp = Math.max(1, ...(solid.length ? solid : opp).map((r) => Math.abs(r.avgDiff)));
+  const oppRow = (r) => `<details class="drow-wrap${r.games < min ? " few" : ""}">
+    <summary class="drow">
+      <span class="nm">${esc(r.name)}${r === nemesis ? `<span class="tag">剋星</span>` : ""}${r === atm ? `<span class="tag">提款機</span>` : ""}</span>
+      ${dbar(r.avgDiff, maxOpp)}
+      <span class="num val ${cls(r.avgDiff)}">${r0(r.avgDiff)}</span>
+    </summary>
+    <div class="more">同桌 ${r.games} 場・分數贏過他 ${pctS(r.aheadRate)}${r.p ? `<br>這幾場你的場均 <b class="num ${cls(r.p.avg)}">${r0(r.p.avg)}</b>、勝率 ${pctS(r.p.winRate)}` : ""}</div>
+  </details>`;
+  const opponents = `<div class="card">
+    <h3>⚔️ 對上每個人</h3>
+    <div class="muted">同桌時你平均比他多拿幾分。往右（紅）＝你贏他，往左（綠）＝他贏你。點名字看細節。</div>
+    ${opp.length ? `<div class="dlist">${solid.map(oppRow).join("")}</div>
+      ${few.length ? `<details class="sub"><summary class="linkbtn">同桌不到 ${min} 場的 ${few.length} 人</summary><div class="dlist">${few.map(oppRow).join("")}</div></details>` : ""}`
+      : `<div class="muted">沒有同桌紀錄</div>`}
+  </div>`;
+
+  // ── 每月 ──
+  const thisYear = new Date().getFullYear();
+  const ms = a.months.slice(0, 12);
+  const maxM = Math.max(1, ...ms.map((m) => Math.abs(m.total)));
+  const months = `<div class="card">
+    <h3>📅 每月輸贏</h3>
+    <div class="dlist">${ms.map((m) => {
+      const [y, mo] = m.month.split("-");
+      return `<div class="drow">
+        <span class="nm">${Number(y) === thisYear ? `${Number(mo)} 月` : `${y}/${Number(mo)}`}<small>${m.games} 場・${pctS(m.wins / m.games)}</small></span>
+        ${dbar(m.total, maxM)}
+        <span class="num val ${cls(m.total)}">${signed(m.total)}</span></div>`;
+    }).join("")}</div>
+  </div>`;
+
+  // ── 同桌組合（收起來） ──
   const solidTables = a.tables.filter((t) => t.games >= min);
   const shownTables = anShowAllTables ? a.tables : (solidTables.length ? solidTables : a.tables.slice(0, 5));
   const hiddenCount = a.tables.length - shownTables.length;
   const tableRows = shownTables.map((t) => `<tr class="${t.games < min ? "few" : ""}">
       <td title="${esc(t.names.join("、"))}">${t.names.length ? esc(t.names.join("、")) : "（只有自己）"}</td>
       <td class="num">${t.games}</td><td class="num">${pctS(t.winRate)}</td>
-      <td class="num ${t.games < min ? "" : cls(t.avg)}">${signed(t.avg)}</td></tr>`).join("");
-  const tables = `<div class="card">
-    <h3>🀄 遇到哪一桌</h3>
+      <td class="num ${t.games < min ? "" : cls(t.avg)}">${r0(t.avg)}</td></tr>`).join("");
+  const tables = `<details class="card fold" ${anShowAllTables ? "open" : ""}>
+    <summary><h3>🀄 遇到哪一桌</h3><span class="muted">展開</span></summary>
     <div class="muted">同桌的其他人完全一樣才算同一組。${solidTables.length ? `只列打滿 ${min} 場的組合。` : `還沒有組合打滿 ${min} 場，先列場數最多的幾組。`}</div>
     ${a.tables.length ? `<table class="t"><tr><th>同桌其他人</th><th>場數</th><th>勝率</th><th>場均</th></tr>${tableRows}</table>` : `<div class="muted">沒有紀錄</div>`}
     ${hiddenCount > 0 ? `<button class="linkbtn" id="anMoreTables">顯示全部 ${a.tables.length} 組</button>` : ""}
-  </div>`;
+  </details>`;
 
-  const monthRows = a.months.map((m) => `<tr><td class="num">${m.month}</td><td class="num">${m.games}</td>
-      <td class="num">${pctS(m.wins / m.games)}</td><td class="num ${cls(m.total)}">${signed(m.total)}</td></tr>`).join("");
-  const months = `<div class="card">
-    <h3>📅 每月</h3>
-    <table class="t"><tr><th>月份</th><th>場數</th><th>勝率</th><th>累計</th></tr>${monthRows}</table>
-  </div>`;
-
-  $("#anBody").innerHTML = kpis + facts + partners + rivals + tables + months;
+  $("#anBody").innerHTML = verdict + kpis + recent + opponents + months + tables;
   const more = $("#anMoreTables");
   if (more) more.onclick = () => { anShowAllTables = true; drawAnalysis(a); };
+  for (const b of document.querySelectorAll("#anBody .bars .b")) {
+    b.onclick = () => {
+      const g = rec[Number(b.dataset.i)];
+      for (const x of document.querySelectorAll("#anBody .bars .b")) x.classList.toggle("sel", x === b);
+      $("#anBarInfo").innerHTML = `${day(g.played_at)} 這場 <b class="num ${cls(g.points)}">${signed(g.points)}</b><br>${bestWorst}`;
+    };
+  }
 }
 
 /** 試玩模式用：和後端 computeAnalysis 同樣的算法 */
@@ -750,6 +846,7 @@ function analyzeLocal(pid, players, games, scores) {
     tables: [...tAgg.values()].map((a) => ({ player_ids: a.ids, names: a.ids.map((id) => nameOf.get(id) || "?"), games: a.games, wins: a.wins, winRate: a.wins / a.games, avg: r1(a.total / a.games), total: a.total }))
       .sort((x, y) => y.games - x.games || y.winRate - x.winRate),
     months: [...mAgg.values()].map((a) => ({ ...a, avg: r1(a.total / a.games) })).sort((x, y) => y.month.localeCompare(x.month)),
+    recent: mine.slice(-20).map((m) => ({ game_id: m.g.id, played_at: m.g.played_at, points: m.points })),
   };
 }
 

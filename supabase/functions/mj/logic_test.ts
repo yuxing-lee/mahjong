@@ -70,6 +70,7 @@ Deno.test("個人分析：同桌、對手、整桌、連勝、月份", () => {
   assertEquals(r.longestWinStreak, 3);
   assertEquals(r.best!.game_id, "g2");
   assertEquals(r.worst!.game_id, "g1");
+  assertEquals(r.recent.map((x) => x.points), [-50, 100, 30, 20]);
 
   const hua = r.partners.find((p) => p.name === "阿華")!;
   assertEquals([hua.games, hua.wins, hua.avg], [4, 3, 25]);
