@@ -175,6 +175,13 @@
   .fold summary h3 { margin: 0; }
   .fold[open] summary .muted { display: none; }
   .fold[open] summary { margin-bottom: 6px; }
+  .picks { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+  .pick { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--line); background: var(--card);
+    border-radius: 99px; padding: 5px 10px; font: inherit; font-size: 13px; color: var(--muted); }
+  .pick i { width: 8px; height: 8px; border-radius: 50%; background: var(--line); }
+  .pick.on { color: var(--ink); border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); font-weight: 700; }
+  .pick.on i { background: var(--c); }
+  .pick .num { font-size: 12px; font-weight: 400; }
   .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
   .facts dt { color: var(--muted); } .facts dd { margin: 0; }
   .linkbtn { background: none; border: 0; padding: 6px 0 0; color: var(--felt); font: inherit; font-size: 13px; }
@@ -239,9 +246,11 @@
     </section>
 
     <section id="tab-trend">
-      <div class="card" style="height:300px"><canvas id="chart"></canvas></div>
+      <div class="muted" style="margin:0 2px 8px">點名字選要看誰（最多 6 人），其他人是淡灰色的線。</div>
+      <div class="picks" id="trendPick"></div>
+      <div class="card" style="height:320px"><canvas id="chart"></canvas></div>
       <div class="card empty" id="chartEmpty" hidden>還沒有任何對局</div>
-      <div class="muted">每一點是該場結束後的累計分數。</div>
+      <div class="muted">每一點是該場結束後的累計分數，台費帳戶不列入。</div>
     </section>
 
     <section id="tab-history"><div id="history"></div></section>
@@ -850,32 +859,90 @@ function analyzeLocal(pid, players, games, scores) {
   };
 }
 
-const PALETTE = ["#B83A2E", "#1F5C46", "#C98A16", "#3B5BA9", "#8E44AD", "#16A085", "#D35400", "#7F8C8D", "#2C3E50", "#C0392B"];
+const PALETTE = ["#B83A2E", "#3B5BA9", "#C98A16", "#8E44AD", "#16A085", "#D35400"];
+const MAX_PICK = PALETTE.length;
+let trendPick = null; // 被強調的 player_id（依點選順序），null＝還沒選過，用預設
+const trendColor = new Map(); // player_id -> 顏色，選取期間固定不變
 function renderChart() {
-  const { labels, series } = data.series;
-  const active = series.filter((s) => s.values.some((v) => v !== 0));
+  const { labels } = data.series;
+  // 台費帳戶不畫；只畫有打過的人，依目前累計排序
+  const house = new Set(data.players.filter((p) => p.house).map((p) => p.id));
+  const active = data.series.series
+    .filter((s) => !house.has(s.player_id) && s.values.some((v) => v !== 0))
+    .sort((a, b) => b.values[b.values.length - 1] - a.values[a.values.length - 1]);
   const ctx = $("#chart");
   if (chart) { chart.destroy(); chart = null; }
   $("#chartEmpty").hidden = labels.length > 0;
   ctx.parentElement.hidden = !labels.length;
+  $("#trendPick").hidden = !labels.length;
   if (!labels.length) return;
+
+  const ids = new Set(active.map((s) => s.player_id));
+  if (trendPick) trendPick = trendPick.filter((id) => ids.has(id));
+  if (!trendPick || !trendPick.length) {
+    // 預設：自己 + 目前第一名 + 最後一名
+    const def = [data.me.player, active[0]?.player_id, active[active.length - 1]?.player_id];
+    trendPick = [...new Set(def.filter((id) => id && ids.has(id)))];
+  }
+  for (const id of [...trendColor.keys()]) if (!trendPick.includes(id)) trendColor.delete(id);
+  for (const id of trendPick) {
+    if (!trendColor.has(id)) trendColor.set(id, PALETTE.find((c) => ![...trendColor.values()].includes(c)));
+  }
+  const colorOf = trendColor;
+
+  const last = (s) => s.values[s.values.length - 1];
+  $("#trendPick").innerHTML = active.map((s) => {
+    const c = colorOf.get(s.player_id);
+    return `<button class="pick${c ? " on" : ""}" data-id="${s.player_id}" style="${c ? `--c:${c}` : ""}">
+      <i></i>${esc(s.name)}${s.player_id === data.me.player ? "（我）" : ""} <span class="num ${cls(last(s))}">${signed(last(s))}</span></button>`;
+  }).join("");
+  for (const b of document.querySelectorAll("#trendPick .pick")) {
+    b.onclick = () => {
+      const id = b.dataset.id;
+      if (trendPick.includes(id)) trendPick = trendPick.filter((x) => x !== id);
+      else if (trendPick.length < MAX_PICK) trendPick = [...trendPick, id];
+      else return toast(`最多同時看 ${MAX_PICK} 個人`);
+      renderChart();
+    };
+  }
+
+  // 沒選的人畫成淡灰色當背景，選的人畫在最上層
+  const bg = active.filter((s) => !colorOf.has(s.player_id));
+  const fg = trendPick.map((id) => active.find((s) => s.player_id === id));
+  const many = labels.length > 30;
   chart = new Chart(ctx, {
     type: "line",
     data: {
       labels: ["開始", ...labels],
-      datasets: active.map((s, i) => ({
-        label: s.name, data: [0, ...s.values],
-        borderColor: PALETTE[i % PALETTE.length], backgroundColor: PALETTE[i % PALETTE.length],
-        tension: .25, pointRadius: labels.length > 30 ? 0 : 2.5, borderWidth: 2,
-      })),
+      datasets: [
+        ...bg.map((s) => ({
+          label: s.name, data: [0, ...s.values], bg: true,
+          borderColor: "rgba(122,133,127,.22)", borderWidth: 1.2, pointRadius: 0, pointHoverRadius: 0, tension: .25, order: 2,
+        })),
+        ...fg.map((s) => ({
+          label: s.name, data: [0, ...s.values],
+          borderColor: colorOf.get(s.player_id), backgroundColor: colorOf.get(s.player_id),
+          borderWidth: 2.5, pointRadius: many ? 0 : 2.5, pointHoverRadius: 4, tension: .25, order: 1,
+        })),
+      ],
     },
     options: {
-      responsive: true, maintainAspectRatio: false,
+      responsive: true, maintainAspectRatio: false, animation: false,
       interaction: { mode: "index", intersect: false },
-      plugins: { legend: { position: "bottom", labels: { boxWidth: 10, font: { family: "Noto Sans TC" } } } },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          filter: (item) => !item.dataset.bg,
+          itemSort: (a, b) => b.parsed.y - a.parsed.y,
+          callbacks: { label: (item) => ` ${item.dataset.label} ${signed(item.parsed.y)}` },
+        },
+      },
       scales: {
-        x: { grid: { display: false }, ticks: { maxTicksLimit: 8 } },
-        y: { grid: { color: "#E3DDD0" }, ticks: { font: { family: "JetBrains Mono" } } },
+        x: { grid: { display: false }, ticks: { maxTicksLimit: 6 } },
+        y: {
+          grid: { color: (c) => c.tick.value === 0 ? "#7A857F" : "#E3DDD0" },
+          ticks: { font: { family: "JetBrains Mono" }, maxTicksLimit: 6 },
+        },
       },
     },
   });
