@@ -119,6 +119,27 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   // 拆兩桌：先記一場「兩桌合在一起」的，再拆開
   await say(ADMIN, "/加人 甲 乙 丙 丁");
   await say(ADMIN, "/設台費 阿美");
+
+  // 額外消費：跟牌局分開，只記品項和總金額
+  ok((await say(OTHER, "/消費 飲料 300")).includes("只有管理員"));
+  ok((await say(ADMIN, "/消費 飲料")).includes("用法"));
+  ok((await say(ADMIN, "/消費 飲料 0")).includes("大於 0"));
+  const ex = await say(ADMIN, "/消費 飲料 300");
+  ok(ex.includes("已記錄") && ex.includes("額外消費 -300") && ex.includes("（阿美）") && ex.includes("飲料 300"), ex);
+  ok((await say(OTHER, "/消費")).includes("額外消費 -300"), "所有人都能看帳");
+  eq((await api(OTHER, "expense", { code, item: "宵夜", amount: 200 })).status, 403);
+  eq((await api(ADMIN, "expense", { code, item: "", amount: 200 })).status, 400);
+  eq((await api(ADMIN, "expense", { code, item: "宵夜", amount: 200, spent_at: "2026-02-01T12:00:00Z" })).status, 200);
+  let er = (await api(ADMIN, `room?code=${code}`)).body;
+  eq(er.expenses.map((e: any) => [e.item, e.amount]), [["飲料", 300], ["宵夜", 200]]);
+  ok(er.houseMonths.some((m: any) => m.month === "2026-02" && m.expense === 200));
+  eq(er.totalGames, rm.totalGames - 1, "消費不算場數");
+  const snack = er.expenses.find((e: any) => e.item === "宵夜");
+  eq((await api(OTHER, "expense/delete", { code, expense_id: snack.id })).status, 403);
+  eq((await api(ADMIN, "expense/delete", { code, expense_id: snack.id })).status, 200);
+  eq((await api(ADMIN, "expense/delete", { code, expense_id: snack.id })).status, 404);
+  er = (await api(ADMIN, `room?code=${code}`)).body;
+  eq(er.expenses.length, 1);
   const merged = "/記 小明+300 阿華-200 老王-100 甲-100 乙+200 丙-100 丁-150 阿美+150";
   ok((await say(ADMIN, merged)).includes("小明 +300"));
   let rs = (await api(ADMIN, `room?code=${code}`)).body;

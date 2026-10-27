@@ -1,6 +1,9 @@
 // 資料存取介面：Bot / API 只透過這裡讀寫，底層可以換成 JSON 檔或 Supabase
 import type { Game, Player, Score } from "./logic.ts";
 
+/** 額外消費（例如飲料錢），跟牌局輸贏分開 */
+export type Expense = { id: string; item: string; amount: number; spent_at: string };
+
 export type Room = {
   id: string;
   code: string;
@@ -37,6 +40,11 @@ export interface Store {
   setGameDate(roomId: string, gameId: string, playedAt: string): Promise<boolean>;
   /** 刪最後一場，沒有則回傳 false */
   deleteLastGame(roomId: string): Promise<boolean>;
+
+  /** 由新到舊 */
+  expensesOf(roomId: string): Promise<Expense[]>;
+  addExpense(roomId: string, by: string, item: string, amount: number, spentAt?: string): Promise<string>;
+  deleteExpense(roomId: string, expenseId: string): Promise<boolean>;
 }
 
 export class UserError extends Error {}
@@ -54,6 +62,16 @@ export function checkGame(entries: { player_id: string; points: number }[], room
   const sum = entries.reduce((a, e) => a + e.points, 0);
   if (sum !== 0) throw new UserError(`分數總和必須為 0（目前 ${sum}）`);
   if (entries.some((e) => !roomPlayerIds.has(e.player_id))) throw new UserError("有玩家不屬於這個房間");
+}
+
+/** 檢查消費的品項和金額；不合理就丟出 UserError */
+export function checkExpense(item: unknown, amount: unknown): { item: string; amount: number } {
+  const it = String(item ?? "").trim().slice(0, 30);
+  const n = Number(amount);
+  if (!it) throw new UserError("請輸入品項，例如：飲料");
+  if (!Number.isInteger(n) || n <= 0) throw new UserError("金額要是大於 0 的整數");
+  if (n > 1_000_000) throw new UserError("金額太大了");
+  return { item: it, amount: n };
 }
 
 /** 檢查並正規化前端傳來的對局時間；不合理就丟出 UserError */

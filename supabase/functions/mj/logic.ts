@@ -330,3 +330,39 @@ export function validateSplit(original: Entry[], tables: Entry[][], houseIds: Se
   }
   return null;
 }
+
+// ───────────────────────── 額外消費 ─────────────────────────
+
+/** 解析「/消費 飲料 300」「/消費 飲料300」的參數；看不懂就回傳 null */
+export function parseExpenseText(text: string): { item: string; amount: number } | null {
+  const t = text.replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0)).replace(/[,，]/g, "").trim();
+  const m = t.match(/^(.*?)[\s:：]*\$?(\d+)\s*(元|塊)?$/);
+  if (!m) return null;
+  return { item: m[1].trim() || "消費", amount: parseInt(m[2], 10) };
+}
+
+export type HouseMonth = { month: string; income: number; expense: number; net: number; games: number };
+
+/**
+ * 台費帳戶每月的帳：income＝牌局裡台費帳戶拿到的分數，expense＝額外消費。
+ * 由新到舊；只要該月有任何一項就列出。
+ */
+export function houseLedger(
+  players: Player[], games: Game[], scores: Score[], expenses: { amount: number; spent_at: string }[],
+): HouseMonth[] {
+  const house = new Set(players.filter((p) => p.is_house).map((p) => p.id));
+  const monthOfGame = new Map(games.map((g) => [g.id, monthOf(g.played_at)]));
+  const m = new Map<string, HouseMonth>();
+  const get = (k: string) => m.get(k) ?? (m.set(k, { month: k, income: 0, expense: 0, net: 0, games: 0 }), m.get(k)!);
+  const counted = new Set<string>();
+  for (const s of scores) {
+    if (!house.has(s.player_id)) continue;
+    const k = monthOfGame.get(s.game_id);
+    if (!k) continue;
+    const row = get(k);
+    row.income += s.points;
+    if (!counted.has(s.game_id)) { counted.add(s.game_id); row.games += 1; }
+  }
+  for (const e of expenses) get(monthOf(e.spent_at)).expense += e.amount;
+  return [...m.values()].map((r) => ({ ...r, net: r.income - r.expense })).sort((a, b) => b.month.localeCompare(a.month));
+}

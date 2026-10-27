@@ -8,6 +8,8 @@
 //   POST api/game/delete  ← 管理員刪一場
 //   POST api/game/date    ← 管理員改某場的日期
 //   POST api/game/split   ← 管理員把一場拆成兩桌
+//   POST api/expense      ← 管理員記一筆額外消費（例如飲料錢）
+//   POST api/expense/delete ← 管理員刪一筆額外消費
 //   POST api/player       ← 管理員加玩家
 //   POST api/claim        ← 玩家認領自己的名字
 //
@@ -21,10 +23,10 @@
 // 沒設定 LINE_CHANNEL_ACCESS_TOKEN 時，Bot 要送的訊息只會印在 console，方便本機測試。
 
 import {
-  type Analysis, computeAnalysis, computeStandings, cumulativeSeries, formatGameLine, makeRoomCode,
-  parseScoreText, signed, type Standing, validateEntries, validateSplit,
+  type Analysis, computeAnalysis, computeStandings, cumulativeSeries, formatGameLine, houseLedger, makeRoomCode,
+  monthOf, parseExpenseText, parseScoreText, signed, type Standing, validateEntries, validateSplit,
 } from "./logic.ts";
-import { isRoomAdmin, makeStore, parsePlayedAt, type Room, UserError } from "./store.ts";
+import { checkExpense, isRoomAdmin, makeStore, parsePlayedAt, type Room, UserError } from "./store.ts";
 
 const env = (k: string) => Deno.env.get(k) ?? "";
 const store = await makeStore();
@@ -227,6 +229,8 @@ const HELP = [
   "/撤銷　刪掉最後一場（管理員）",
   "/刪房　刪除這個房間和所有紀錄（管理員）",
   "/設台費 名字　把場主設備錢之類的帳戶排除在分析外（管理員）",
+  "/消費 飲料 300　記一筆額外消費，不算進輸贏（管理員）",
+  "/消費　看這個月的台費收入、消費和結餘",
   "/設管理員 @某人　把他設成管理員（管理員）",
   "/移除管理員 @某人　取消他的管理員（管理員）",
   "/管理員　看目前有哪些管理員",
@@ -236,6 +240,27 @@ const HELP = [
   "＊加人、記分、撤銷、刪房、設管理員只有管理員能操作",
   "＊分數只作為遊戲紀錄，不具任何金錢價值",
 ].join("\n");
+
+/** 這個月的台費收入、額外消費、結餘，加上最近幾筆消費 */
+async function expenseSummary(room: Room, head = "") {
+  const [players, { games, scores }, expenses] = await Promise.all([
+    store.playersOf(room.id), store.gamesOf(room.id), store.expensesOf(room.id),
+  ]);
+  const month = monthOf(new Date().toISOString());
+  const row = houseLedger(players, games, scores, expenses).find((m) => m.month === month);
+  const houseName = players.filter((p) => p.is_house).map((p) => p.name).join("、");
+  const recent = expenses.filter((e) => monthOf(e.spent_at) === month).slice(0, 5)
+    .map((e) => `・${mdTaipei(e.spent_at)} ${e.item} ${e.amount}`);
+  const lines: string[] = [];
+  if (head) lines.push(head);
+  lines.push(`🧾 ${room.name}｜${Number(month.slice(5))} 月${houseName ? `（${houseName}）` : ""}`);
+  if (houseName) lines.push(`台費收入 ${signed(row?.income ?? 0)}（${row?.games ?? 0} 場）`);
+  lines.push(`額外消費 -${row?.expense ?? 0}`);
+  if (houseName) lines.push(`結餘 ${signed(row?.net ?? 0)}`);
+  lines.push("", recent.length ? `最近的消費：\n${recent.join("\n")}` : "這個月還沒有消費紀錄");
+  lines.push("", `明細：記分頁 → 紀錄\n${liffUrl(room)}`);
+  return lines.join("\n");
+}
 
 // ───────────────────────── Webhook ─────────────────────────
 
@@ -323,6 +348,16 @@ async function handleEvent(ev: any) {
         if (target.is_house) return void await r([text(`「${target.name}」是台費帳戶，不列入分析。`)]);
         return void await r([text(analysisText(computeAnalysis(target.id, players, games, scores)!, room))]);
       }
+
+      case "/消費":
+        if (args.trim() && !isAdmin) return void await r([text("只有管理員可以記消費。輸入 /消費 可以看這個月的帳。")]);
+        if (args.trim()) {
+          const parsed = parseExpenseText(args);
+          if (!parsed) return void await r([text("用法：/消費 飲料 300（品項 金額）")]);
+          const { item, amount } = checkExpense(parsed.item, parsed.amount);
+          await store.addExpense(room.id, userId!, item, amount);
+        }
+        return void await r([text(await expenseSummary(room, args.trim() ? "🧾 已記錄。" : ""))]);
 
       case "/最近": {
         const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
@@ -468,7 +503,9 @@ async function handleApi(req: Request, route: string) {
   const requireAdmin = () => { if (!isAdmin) throw new HttpError(403, "只有管理員可以操作"); };
 
   if (route === "room" && req.method === "GET") {
-    const [players, { games, scores }] = await Promise.all([store.playersOf(room.id), store.gamesOf(room.id)]);
+    const [players, { games, scores }, expenses] = await Promise.all([
+      store.playersOf(room.id), store.gamesOf(room.id), store.expensesOf(room.id),
+    ]);
     const names = new Map(players.map((p) => [p.id, p.name]));
     const recent = games.map((g, i) => ({ g, no: i + 1 })).slice(-30).reverse().map(({ g, no }) => ({
       id: g.id, played_at: g.played_at, note: g.note, no,
@@ -484,6 +521,8 @@ async function handleApi(req: Request, route: string) {
       series: cumulativeSeries(players, games, scores),
       recent,
       totalGames: games.length,
+      expenses,
+      houseMonths: houseLedger(players, games, scores, expenses),
     });
   }
 
@@ -550,6 +589,19 @@ async function handleApi(req: Request, route: string) {
       for (const id of created) await store.deleteGame(room.id, id).catch(() => {});
       throw e;
     }
+    return json({ ok: true });
+  }
+
+  if (route === "expense" && req.method === "POST") {
+    requireAdmin();
+    const { item, amount } = checkExpense(body.item, body.amount);
+    await store.addExpense(room.id, me.userId, item, amount, parsePlayedAt(body.spent_at));
+    return json({ ok: true });
+  }
+
+  if (route === "expense/delete" && req.method === "POST") {
+    requireAdmin();
+    if (!(await store.deleteExpense(room.id, String(body.expense_id)))) throw new HttpError(404, "找不到這筆消費");
     return json({ ok: true });
   }
 

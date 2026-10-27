@@ -1,11 +1,12 @@
 // 本機 JSON 檔儲存：不需要任何雲端服務，適合先試做、少量使用
 import type { Game, Player, Score } from "./logic.ts";
-import { checkGame, type Room, type Store, UserError } from "./store.ts";
+import { checkGame, type Expense, type Room, type Store, UserError } from "./store.ts";
 
 type GameRow = Game & { room_id: string; created_by: string };
 type PlayerRow = Player & { room_id: string; created_at: string };
 type AdminRow = { room_id: string; line_user_id: string; added_by: string };
-type Data = { rooms: Room[]; players: PlayerRow[]; games: GameRow[]; scores: Score[]; admins?: AdminRow[] };
+type ExpenseRow = Expense & { room_id: string; created_by: string };
+type Data = { rooms: Room[]; players: PlayerRow[]; games: GameRow[]; scores: Score[]; admins?: AdminRow[]; expenses?: ExpenseRow[] };
 
 export class FileStore implements Store {
   private data: Data = { rooms: [], players: [], games: [], scores: [] };
@@ -75,6 +76,7 @@ export class FileStore implements Store {
       this.data.players = this.data.players.filter((p) => p.room_id !== roomId);
       this.data.rooms = this.data.rooms.filter((r) => r.id !== roomId);
       this.data.admins = (this.data.admins ?? []).filter((a) => a.room_id !== roomId);
+      this.data.expenses = (this.data.expenses ?? []).filter((x) => x.room_id !== roomId);
     }, true);
   }
 
@@ -182,6 +184,30 @@ export class FileStore implements Store {
       this.data.games = this.data.games.filter((g) => g.id !== last.id);
       this.data.scores = this.data.scores.filter((s) => s.game_id !== last.id);
       return true;
+    }, true);
+  }
+
+  expensesOf(roomId: string) {
+    return this.run(() =>
+      (this.data.expenses ?? []).filter((x) => x.room_id === roomId)
+        .sort((a, b) => b.spent_at.localeCompare(a.spent_at))
+        .map(({ id, item, amount, spent_at }) => ({ id, item, amount, spent_at }))
+    );
+  }
+
+  addExpense(roomId: string, by: string, item: string, amount: number, spentAt?: string) {
+    return this.run(() => {
+      const id = crypto.randomUUID();
+      (this.data.expenses ??= []).push({ id, room_id: roomId, created_by: by, item, amount, spent_at: spentAt ?? new Date().toISOString() });
+      return id;
+    }, true);
+  }
+
+  deleteExpense(roomId: string, expenseId: string) {
+    return this.run(() => {
+      const before = (this.data.expenses ?? []).length;
+      this.data.expenses = (this.data.expenses ?? []).filter((x) => !(x.id === expenseId && x.room_id === roomId));
+      return this.data.expenses.length !== before;
     }, true);
   }
 }

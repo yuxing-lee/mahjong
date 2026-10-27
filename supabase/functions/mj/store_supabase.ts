@@ -1,7 +1,7 @@
 // Supabase 儲存（保留備用）：設定 STORE=supabase 並先跑 migrations/001_init.sql
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import type { Score } from "./logic.ts";
-import type { Room, Store } from "./store.ts";
+import type { Expense, Room, Store } from "./store.ts";
 import { UserError } from "./store.ts";
 
 export class SupabaseStore implements Store {
@@ -137,5 +137,27 @@ export class SupabaseStore implements Store {
     if (!last) return false;
     await this.deleteGame(roomId, last.id);
     return true;
+  }
+
+  async expensesOf(roomId: string) {
+    const { data, error } = await this.db.from("expenses").select("id,item,amount,spent_at")
+      .eq("room_id", roomId).order("spent_at", { ascending: false });
+    if (error) throw error;
+    return (data ?? []) as Expense[];
+  }
+
+  async addExpense(roomId: string, by: string, item: string, amount: number, spentAt?: string) {
+    const { data, error } = await this.db.from("expenses")
+      .insert({ room_id: roomId, created_by: by, item, amount, ...(spentAt ? { spent_at: spentAt } : {}) })
+      .select("id").single();
+    if (error) throw new UserError(error.message);
+    return data.id as string;
+  }
+
+  async deleteExpense(roomId: string, expenseId: string) {
+    const { data, error } = await this.db.from("expenses").delete()
+      .eq("id", expenseId).eq("room_id", roomId).select("id");
+    if (error) throw error;
+    return (data ?? []).length > 0;
   }
 }

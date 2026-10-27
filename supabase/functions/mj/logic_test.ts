@@ -142,3 +142,34 @@ Deno.test("拆桌檢查", () => {
   const t2bad = t2ok.map((e) => e.player_id === "a" ? { ...e, points: 100 } : e.player_id === "h" ? { ...e, points: 0 } : e);
   assertEquals(validateSplit(orig, [t1ok, t2bad], H), "同一個人在各桌的分數加起來，要和原本一樣");
 });
+
+import { houseLedger, parseExpenseText } from "./logic.ts";
+
+Deno.test("parseExpenseText", () => {
+  assertEquals(parseExpenseText("飲料 300"), { item: "飲料", amount: 300 });
+  assertEquals(parseExpenseText("飲料300"), { item: "飲料", amount: 300 });
+  assertEquals(parseExpenseText("宵夜 1,200元"), { item: "宵夜", amount: 1200 });
+  assertEquals(parseExpenseText("５００"), { item: "消費", amount: 500 });
+  assertEquals(parseExpenseText("飲料"), null);
+  assertEquals(parseExpenseText(""), null);
+});
+
+Deno.test("houseLedger", () => {
+  const P = [{ id: "a", name: "A", line_user_id: null }, { id: "b", name: "B", line_user_id: null }, { id: "h", name: "東", line_user_id: null, is_house: true }];
+  const games = [
+    { id: "g1", played_at: "2026-09-30T15:00:00Z", note: null }, // 台灣 9/30
+    { id: "g2", played_at: "2026-10-02T12:00:00Z", note: null },
+    { id: "g3", played_at: "2026-10-03T12:00:00Z", note: null },
+  ];
+  const scores = [
+    { game_id: "g1", player_id: "a", points: 100 }, { game_id: "g1", player_id: "b", points: -500 }, { game_id: "g1", player_id: "h", points: 400 },
+    { game_id: "g2", player_id: "a", points: -400 }, { game_id: "g2", player_id: "h", points: 400 },
+    { game_id: "g3", player_id: "a", points: 10 }, { game_id: "g3", player_id: "b", points: -10 },
+  ];
+  const r = houseLedger(P, games, scores, [{ amount: 300, spent_at: "2026-10-02T13:00:00Z" }, { amount: 50, spent_at: "2026-08-01T13:00:00Z" }]);
+  assertEquals(r, [
+    { month: "2026-10", income: 400, expense: 300, net: 100, games: 1 },
+    { month: "2026-09", income: 400, expense: 0, net: 400, games: 1 },
+    { month: "2026-08", income: 0, expense: 50, net: -50, games: 0 },
+  ]);
+});

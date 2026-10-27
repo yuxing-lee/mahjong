@@ -182,6 +182,18 @@
   .pick.on { color: var(--ink); border-color: var(--c); box-shadow: inset 0 0 0 1px var(--c); font-weight: 700; }
   .pick.on i { background: var(--c); }
   .pick .num { font-size: 12px; font-weight: 400; }
+  .exphead { display: flex; justify-content: space-between; align-items: baseline; }
+  .exphead h3 { margin: 0; }
+  .kpis.one { grid-template-columns: 1fr; }
+  .expform { border-top: 1px solid var(--line); padding-top: 10px; margin-top: 8px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  .chipbtn { border: 1px solid var(--line); background: #fff; border-radius: 99px; padding: 4px 12px; font: inherit; font-size: 13px; color: var(--ink); }
+  .exprow { display: flex; gap: 8px; margin-bottom: 8px; }
+  .exprow input { flex: 1; min-width: 0; height: 40px; border-radius: 10px; border: 1px solid var(--line); padding: 0 10px; font: inherit; background: #fff; color: var(--ink); }
+  .exprow .btn { height: 40px; flex: none; }
+  .explist { margin-top: 4px; }
+  .exp { display: grid; grid-template-columns: 3.2em 1fr auto auto; gap: 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); font-size: 15px; }
+  .exp .it { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .facts { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
   .facts dt { color: var(--muted); } .facts dd { margin: 0; }
   .linkbtn { background: none; border: 0; padding: 6px 0 0; color: var(--felt); font: inherit; font-size: 13px; }
@@ -253,7 +265,7 @@
       <div class="muted">每一點是該場結束後的累計分數，台費帳戶不列入。</div>
     </section>
 
-    <section id="tab-history"><div id="history"></div></section>
+    <section id="tab-history"><div id="expenses"></div><div id="history"></div></section>
 
     <div class="foot">分數僅作為遊戲紀錄，不具任何金錢價值</div>
   </main>
@@ -334,6 +346,21 @@ const demo = (() => {
     return { labels: db.games.map((_, i) => `#${i + 1}`), series: out };
   }
   const name = (id) => db.players.find((p) => p.id === id)?.name ?? "?";
+  /** 和後端 houseLedger 同樣的算法 */
+  function houseLedgerLocal() {
+    const monthKey = (iso) => { const d = new Date(new Date(iso).getTime() + 8 * 3600e3); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`; };
+    const house = new Set(db.players.filter((p) => p.is_house).map((p) => p.id));
+    const gm = new Map(db.games.map((g) => [g.id, monthKey(g.played_at)]));
+    const m = new Map(), counted = new Set();
+    const get = (k) => m.get(k) || (m.set(k, { month: k, income: 0, expense: 0, net: 0, games: 0 }), m.get(k));
+    for (const s of db.scores) {
+      if (!house.has(s.player_id) || !gm.has(s.game_id)) continue;
+      const r = get(gm.get(s.game_id)); r.income += s.points;
+      if (!counted.has(s.game_id)) { counted.add(s.game_id); r.games++; }
+    }
+    for (const e of db.expenses || []) get(monthKey(e.spent_at)).expense += e.amount;
+    return [...m.values()].map((r) => ({ ...r, net: r.income - r.expense })).sort((a, b) => b.month.localeCompare(a.month));
+  }
 
   return async function (path, opts = {}) {
     const body = opts.body ? JSON.parse(opts.body) : {};
@@ -344,6 +371,8 @@ const demo = (() => {
         me: { isAdmin: true, player: db.players.find((p) => p.line_user_id === ME)?.id ?? null },
         players: db.players.map((p) => ({ id: p.id, name: p.name, claimed: !!p.line_user_id, house: !!p.is_house })),
         standings: standings(), series: series(), totalGames: db.games.length,
+        expenses: [...(db.expenses || [])].sort((a, b) => b.spent_at.localeCompare(a.spent_at)),
+        houseMonths: houseLedgerLocal(),
         recent: db.games.map((g, i) => ({ g, no: i + 1 })).slice(-30).reverse().map(({ g, no }) => ({
           id: g.id, played_at: g.played_at, note: g.note, no,
           scores: db.scores.filter((s) => s.game_id === g.id).map((s) => ({ player_id: s.player_id, name: name(s.player_id), points: s.points })).sort((a, b) => b.points - a.points),
@@ -377,6 +406,16 @@ const demo = (() => {
       const g = db.games.find((x) => x.id === body.game_id);
       if (!g) throw new Error("找不到這一場");
       g.played_at = body.played_at; db.games.sort((a, b) => a.played_at.localeCompare(b.played_at)); save(); return { ok: true };
+    }
+    if (route === "expense") {
+      const item = String(body.item || "").trim(), amount = Number(body.amount);
+      if (!item) throw new Error("請輸入品項，例如：飲料");
+      if (!Number.isInteger(amount) || amount <= 0) throw new Error("金額要是大於 0 的整數");
+      (db.expenses ||= []).push({ id: uid(), item, amount, spent_at: body.spent_at || new Date().toISOString() });
+      save(); return { ok: true };
+    }
+    if (route === "expense/delete") {
+      db.expenses = (db.expenses || []).filter((e) => e.id !== body.expense_id); save(); return { ok: true };
     }
     if (route === "game/delete") {
       db.games = db.games.filter((g) => g.id !== body.game_id);
@@ -475,7 +514,7 @@ function render() {
   document.querySelectorAll("main section").forEach((s) => s.classList.toggle("on", s.id === `tab-${currentTab}`));
   $("#sumbar").classList.toggle("on", currentTab === "record");
 
-  renderClaim(); renderRows(); renderRank(); renderHistory();
+  renderClaim(); renderRows(); renderRank(); renderExpenses(); renderHistory();
   if (currentTab === "trend") renderChart();
   if (currentTab === "analysis") renderAnalysis();
 }
@@ -945,6 +984,82 @@ function renderChart() {
         },
       },
     },
+  });
+}
+
+// ---------- 額外消費（例如飲料錢），跟牌局輸贏分開 ----------
+let expShowAll = false;
+const EXP_ITEMS = ["飲料", "宵夜", "零食", "便當"];
+function renderExpenses() {
+  const box = $("#expenses");
+  const { me } = data;
+  const expenses = data.expenses || [];
+  const months = data.houseMonths || [];
+  const houseNames = data.players.filter((p) => p.house).map((p) => p.name);
+  const hasHouse = houseNames.length > 0;
+  const now = ymd(new Date()).slice(0, 7);
+  const cur = months.find((m) => m.month === now) || { income: 0, expense: 0, net: 0, games: 0 };
+  const md = (iso) => new Date(iso).toLocaleDateString("zh-TW", { month: "numeric", day: "numeric" });
+  const monthLabel = (k) => { const [y, m] = k.split("-"); return Number(y) === new Date().getFullYear() ? `${Number(m)} 月` : `${y}/${Number(m)}`; };
+
+  const shown = expShowAll ? expenses : expenses.filter((e) => ymd(new Date(e.spent_at)).slice(0, 7) === now);
+  const older = expenses.length - shown.length;
+  const kpi = (k, v, sub = "") => `<div class="kpi"><div class="k">${k}</div><div class="v">${v}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+
+  box.innerHTML = `<div class="card">
+    <div class="exphead"><h3>🧾 ${hasHouse ? `${esc(houseNames.join("、"))}的消費` : "額外消費"}</h3><span class="muted">不算進輸贏</span></div>
+    <div class="kpis ${hasHouse ? "" : "one"}" style="margin:8px 0 4px">
+      ${hasHouse ? kpi(`${monthLabel(now)}台費`, `<span class="pos">${signed(cur.income)}</span>`, `${cur.games} 場`) : ""}
+      ${kpi(`${monthLabel(now)}消費`, `<span class="${cur.expense ? "neg" : ""}">${cur.expense ? `-${cur.expense}` : 0}</span>`)}
+      ${hasHouse ? kpi("結餘", `<span class="${cls(cur.net)}">${signed(cur.net)}</span>`) : ""}
+    </div>
+    ${me.isAdmin ? `<div class="expform">
+      <div class="chips">${EXP_ITEMS.map((t) => `<button type="button" class="chipbtn" data-item="${t}">${t}</button>`).join("")}</div>
+      <div class="exprow">
+        <input id="expItem" maxlength="30" placeholder="品項" aria-label="品項">
+        <input id="expAmount" type="number" inputmode="numeric" min="1" placeholder="金額" aria-label="金額">
+      </div>
+      <div class="exprow">
+        <input id="expDate" type="date" max="${todayStr()}" value="${todayStr()}" aria-label="日期">
+        <button class="btn small" id="expAdd">記一筆</button>
+      </div>
+    </div>` : ""}
+    <div class="explist">
+      ${shown.length ? shown.map((e) => `<div class="exp">
+        <span class="muted num">${md(e.spent_at)}</span><span class="it">${esc(e.item)}</span>
+        <b class="num neg">-${e.amount}</b>
+        ${me.isAdmin ? `<button class="del expdel" data-id="${e.id}" aria-label="刪除 ${esc(e.item)}">刪除</button>` : ""}
+      </div>`).join("") : `<div class="muted" style="padding:8px 0">${monthLabel(now)}還沒有消費紀錄</div>`}
+    </div>
+    ${older > 0 ? `<button class="linkbtn" id="expMore">顯示更早的 ${older} 筆</button>` : ""}
+    ${months.length ? `<details class="sub"><summary class="linkbtn">每月結算</summary>
+      <table class="t"><tr><th>月份</th>${hasHouse ? "<th>台費</th>" : ""}<th>消費</th>${hasHouse ? "<th>結餘</th>" : ""}</tr>
+      ${months.map((m) => `<tr><td>${monthLabel(m.month)}</td>${hasHouse ? `<td class="num pos">${signed(m.income)}</td>` : ""}
+        <td class="num ${m.expense ? "neg" : "muted"}">${m.expense ? `-${m.expense}` : 0}</td>${hasHouse ? `<td class="num ${cls(m.net)}">${signed(m.net)}</td>` : ""}</tr>`).join("")}
+      </table></details>` : ""}
+  </div>`;
+
+  const more = $("#expMore");
+  if (more) more.onclick = () => { expShowAll = true; renderExpenses(); };
+  box.querySelectorAll(".chipbtn").forEach((b) => b.onclick = () => { $("#expItem").value = b.dataset.item; $("#expAmount").focus(); });
+  const add = $("#expAdd");
+  if (add) add.onclick = async () => {
+    const item = $("#expItem").value.trim();
+    const amount = Number($("#expAmount").value);
+    const d = $("#expDate").value || todayStr();
+    if (!item) return toast("請輸入品項，例如：飲料");
+    if (!Number.isInteger(amount) || amount <= 0) return toast("金額要是大於 0 的整數");
+    if (d > todayStr()) return toast("日期不能是未來");
+    add.disabled = true;
+    try {
+      await post("expense", { item, amount, ...(d !== todayStr() ? { spent_at: dateWithTime(d) } : {}) });
+      toast(`已記錄：${item} ${amount}`); await load();
+    } catch (e) { toast(e.message); add.disabled = false; }
+  };
+  box.querySelectorAll(".expdel").forEach((b) => b.onclick = async () => {
+    if (!confirm("確定刪除這筆消費？")) return;
+    try { await post("expense/delete", { expense_id: b.dataset.id }); toast("已刪除"); await load(); }
+    catch (e) { toast(e.message); }
   });
 }
 
