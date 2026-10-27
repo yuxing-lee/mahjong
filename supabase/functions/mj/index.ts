@@ -71,7 +71,7 @@ async function lineCall(path: string, body: unknown) {
 }
 
 // 快速回覆按鈕：出現在輸入框上方，點了就會用使用者的名義送出指令（群組也能用）
-const QUICK_COMMANDS = ["/戰績", "/最近", "/分析", "/記分頁", "/撤銷", "/說明"];
+const QUICK_COMMANDS = ["/選單", "/戰績", "/最近", "/分析", "/記分頁", "/撤銷", "/說明"];
 const quickReply = {
   items: QUICK_COMMANDS.map((cmd) => ({
     type: "action",
@@ -137,7 +137,8 @@ async function verifyIdToken(req: Request): Promise<{ userId: string }> {
   return { userId: info.sub };
 }
 
-const liffUrl = (room: Room) => `https://liff.line.me/${env("LIFF_ID") || "2011866186-iudTebek"}?room=${room.code}`;
+const liffUrl = (room: Room, tab?: string) =>
+  `https://liff.line.me/${env("LIFF_ID") || "2011866186-iudTebek"}?room=${room.code}${tab ? `&tab=${tab}` : ""}`;
 
 // ───────────────────────── 訊息樣式 ─────────────────────────
 
@@ -172,6 +173,50 @@ function standingsFlex(room: Room, list: Standing[], title = "目前戰績"): Me
           type: "button", style: "primary", color: "#1F2937", height: "sm",
           action: { type: "uri", label: "開啟記分頁", uri: liffUrl(room) },
         }],
+      },
+    },
+  };
+}
+
+/** 群組裡的按鈕選單：上面兩排開記分頁的分頁，下面一排直接送出指令 */
+function menuFlex(room: Room, houseName = ""): Message {
+  const tile = (emoji: string, label: string, action: Record<string, string>) => ({
+    type: "box", layout: "vertical", flex: 1, spacing: "xs",
+    backgroundColor: "#F4F1EA", cornerRadius: "12px", paddingTop: "12px", paddingBottom: "10px",
+    action,
+    contents: [
+      { type: "text", text: emoji, size: "xl", align: "center" },
+      { type: "text", text: label, size: "sm", align: "center", color: "#1D2B24", weight: "bold" },
+    ],
+  });
+  const page = (emoji: string, label: string, tab: string) =>
+    tile(emoji, label, { type: "uri", label, uri: liffUrl(room, tab) });
+  const row = (contents: unknown[]) => ({ type: "box", layout: "horizontal", spacing: "sm", contents });
+  const cmd = (label: string, t: string) => ({
+    type: "button", style: "secondary", height: "sm", flex: 1,
+    action: { type: "message", label, text: t },
+  });
+  return {
+    type: "flex",
+    altText: `${room.name}｜選單`,
+    contents: {
+      type: "bubble",
+      header: {
+        type: "box", layout: "vertical", backgroundColor: "#1F5C46", paddingAll: "14px",
+        contents: [
+          { type: "text", text: `🀄 ${room.name}`, color: "#F4F1EA", weight: "bold", size: "md" },
+          { type: "text", text: "點一下直接開啟", color: "#F4F1EAAA", size: "xs" },
+        ],
+      },
+      body: {
+        type: "box", layout: "vertical", spacing: "sm", paddingAll: "12px",
+        contents: [
+          row([page("📝", "記分", "record"), page("🏆", "排行", "rank"), page("📊", "分析", "analysis")]),
+          row([page("📈", "走勢", "trend"), page("📜", "紀錄", "history"), page("🧾", houseName ? `${houseName}的消費`.slice(0, 6) : "額外消費", "expense")]),
+          { type: "separator", margin: "md" },
+          { type: "box", layout: "horizontal", spacing: "sm", margin: "md",
+            contents: [cmd("戰績", "/戰績"), cmd("最近", "/最近"), cmd("本月帳", "/消費")] },
+        ],
       },
     },
   };
@@ -234,6 +279,7 @@ const HELP = [
   "/設管理員 @某人　把他設成管理員（管理員）",
   "/移除管理員 @某人　取消他的管理員（管理員）",
   "/管理員　看目前有哪些管理員",
+  "/選單　叫出按鈕選單，點了直接開啟各個頁面",
   "/記分頁　開啟記分頁面",
   "",
   "＊輸入框上方的按鈕點了就會送出指令",
@@ -319,8 +365,10 @@ async function handleEvent(ev: any) {
 
     switch (cmd) {
       case "/記分頁":
-      case "/選單":
         return void await r([text(`📋 ${room.name} 記分頁：\n${liffUrl(room)}`)]);
+
+      case "/選單":
+        return void await r([menuFlex(room, (await store.playersOf(room.id)).filter((p) => p.is_house).map((p) => p.name)[0])]);
 
       case "/戰績":
       case "/排行": {

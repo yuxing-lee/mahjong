@@ -120,6 +120,12 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   await say(ADMIN, "/加人 甲 乙 丙 丁");
   await say(ADMIN, "/設台費 阿美");
 
+  // 群組選單：Flex 按鈕卡片，連到記分頁指定分頁
+  ok((await say(OTHER, "/選單")).includes("選單"));
+  const menu = JSON.stringify(sent.at(-1)!.body);
+  ok(menu.includes(`room=${code}&tab=analysis`) && menu.includes("阿美的消費") && menu.includes("/消費"), menu);
+  ok(JSON.stringify(sent.at(-1)!.body.messages.at(-1).quickReply).includes("/選單"), "快速按鈕要有選單");
+
   // 額外消費：跟牌局分開，只記品項和總金額
   ok((await say(OTHER, "/消費 飲料 300")).includes("只有管理員"));
   ok((await say(ADMIN, "/消費 飲料")).includes("用法"));
@@ -198,7 +204,7 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   ok((await say(ADMIN, "/撤銷")).includes("已刪除最後一場"));
   const lastMsgs = sent.at(-1)!.body.messages;
   eq(lastMsgs.at(-1).quickReply.items.map((i: any) => i.action.text),
-    ["/戰績", "/最近", "/分析", "/記分頁", "/撤銷", "/說明"], "回覆的最後一則要帶快速回覆按鈕");
+    ["/選單", "/戰績", "/最近", "/分析", "/記分頁", "/撤銷", "/說明"], "回覆的最後一則要帶快速回覆按鈕");
   eq((await api(ADMIN, `room?code=${code}`)).body.totalGames, 2);
 
   // 資料真的寫進檔案

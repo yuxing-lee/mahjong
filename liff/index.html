@@ -454,13 +454,17 @@ async function api(path, opts = {}) {
 }
 const post = (path, payload) => api(path, { method: "POST", body: JSON.stringify({ code: roomCode, ...payload }) });
 
-function readRoomCode() {
+/** 讀網址參數；LIFF 初始化前參數會包在 liff.state 裡 */
+function readParam(name) {
   const p = new URLSearchParams(location.search);
-  if (p.get("room")) return p.get("room");
-  const state = p.get("liff.state"); // 初始化前的轉址參數
-  if (state) return new URLSearchParams(state.split("?")[1] || "").get("room");
+  if (p.get(name)) return p.get(name);
+  const state = p.get("liff.state");
+  if (state) return new URLSearchParams(state.split("?")[1] || "").get(name) || "";
   return "";
 }
+const readRoomCode = () => readParam("room");
+/** 從群組選單點進來時直接開到指定分頁（沒有權限的分頁會自動退回第一個） */
+const TAB_ALIASES = { record: "record", rank: "rank", analysis: "analysis", trend: "trend", history: "history", expense: "history" };
 
 async function boot() {
   try {
@@ -495,7 +499,7 @@ async function load() {
 }
 
 // ---------- render ----------
-let currentTab = null;
+let currentTab = TAB_ALIASES[readParam("tab")] || null;
 function render() {
   const { room, me, totalGames } = data;
   document.title = room.name;
