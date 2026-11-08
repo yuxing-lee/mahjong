@@ -93,6 +93,10 @@
   /* 紀錄 */
   .game { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; }
   .game .scores { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; font-size: 14px; }
+  .plist { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+  .pchip { display: inline-flex; align-items: center; gap: 2px; border: 1px solid var(--line); border-radius: 999px; padding: 2px 4px 2px 10px; font-size: 14px; }
+  .pchip .muted { font-size: 12px; padding-right: 6px; }
+  .pdel { background: none; border: 0; color: var(--muted); font-size: 16px; line-height: 1; width: 28px; height: 28px; border-radius: 50%; }
   .del { background: none; border: 0; color: var(--muted); font-size: 13px; padding: 4px; }
   .acts { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: none; }
   .datefix { display: flex; gap: 6px; margin-top: 8px; }
@@ -238,7 +242,8 @@
         </div>
       </div>
       <div class="card">
-        <div class="muted">新增玩家</div>
+        <div class="muted">玩家</div>
+        <div id="playerList"></div>
         <div class="inline">
           <input id="newName" placeholder="名字" maxlength="20">
           <button class="btn small ghost" id="addBtn">加入</button>
@@ -427,6 +432,13 @@ const demo = (() => {
       if (db.players.some((p) => p.name === n)) throw new Error("這個名字已經存在");
       db.players.push({ id: uid(), name: n, line_user_id: null }); save(); return { ok: true };
     }
+    if (route === "player/delete") {
+      const p = db.players.find((x) => x.id === body.player_id);
+      if (!p) throw new Error("找不到這位玩家");
+      const n = db.scores.filter((s) => s.player_id === p.id).length;
+      if (n) throw new Error(`「${p.name}」已經有 ${n} 場紀錄，不能刪除（要先刪掉那些對局）`);
+      db.players = db.players.filter((x) => x !== p); save(); return { ok: true };
+    }
     if (route === "analysis") {
       const pid = new URLSearchParams(path.split("?")[1] || "").get("player");
       const a = analyzeLocal(pid, db.players, db.games, db.scores);
@@ -570,6 +582,23 @@ function renderRows() {
     };
   });
   updateSum();
+  renderPlayerList();
+}
+
+/** 玩家清單：沒有對局紀錄的可以刪除（有紀錄的刪掉會讓那幾場總和不為 0） */
+function renderPlayerList() {
+  const games = new Map(data.standings.map((s) => [s.player_id, s.games]));
+  $("#playerList").innerHTML = data.players.length ? `<div class="plist">${data.players.map((p) => {
+    const n = games.get(p.id) || 0;
+    return `<span class="pchip">${esc(p.name)}${n
+      ? `<span class="muted">・${n} 場</span>`
+      : `<button class="pdel" data-id="${p.id}" data-name="${esc(p.name)}" aria-label="刪除 ${esc(p.name)}">×</button>`}</span>`;
+  }).join("")}</div><div class="muted" style="font-size:12px;margin-top:4px">只能刪還沒打過的玩家；打過的要先到「紀錄」刪掉那些對局。</div>` : "";
+  $("#playerList").querySelectorAll(".pdel").forEach((b) => b.onclick = async () => {
+    if (!confirm(`確定刪除玩家「${b.dataset.name}」？`)) return;
+    try { await post("player/delete", { player_id: b.dataset.id }); delete entry[b.dataset.id]; toast(`已刪除 ${b.dataset.name}`); await load(); }
+    catch (e) { toast(e.message); }
+  });
 }
 
 function currentScores() {

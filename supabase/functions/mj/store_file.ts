@@ -140,6 +140,16 @@ export class FileStore implements Store {
     }, true);
   }
 
+  deletePlayer(roomId: string, playerId: string) {
+    return this.run(() => {
+      const target = this.data.players.find((p) => p.id === playerId && p.room_id === roomId);
+      if (!target) throw new UserError("找不到這位玩家");
+      const count = this.data.scores.filter((s) => s.player_id === playerId).length;
+      if (count) throw new UserError(`「${target.name}」已經有 ${count} 場紀錄，不能刪除（要先刪掉那些對局）`);
+      this.data.players = this.data.players.filter((p) => p !== target);
+    }, true);
+  }
+
   gamesOf(roomId: string) {
     return this.run(() => {
       const games = this.data.games.filter((g) => g.room_id === roomId)

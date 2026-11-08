@@ -94,6 +94,17 @@ export class SupabaseStore implements Store {
     if (error) throw error;
   }
 
+  async deletePlayer(roomId: string, playerId: string) {
+    const target = (await this.playersOf(roomId)).find((p) => p.id === playerId);
+    if (!target) throw new UserError("找不到這位玩家");
+    const { count, error } = await this.db.from("scores").select("game_id", { count: "exact", head: true })
+      .eq("player_id", playerId);
+    if (error) throw error;
+    if (count) throw new UserError(`「${target.name}」已經有 ${count} 場紀錄，不能刪除（要先刪掉那些對局）`);
+    const { error: e2 } = await this.db.from("players").delete().eq("id", playerId).eq("room_id", roomId);
+    if (e2) throw e2;
+  }
+
   async gamesOf(roomId: string) {
     const { data: games, error } = await this.db.from("games")
       .select("id,played_at,note").eq("room_id", roomId).order("played_at", { ascending: true });

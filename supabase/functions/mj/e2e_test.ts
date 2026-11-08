@@ -71,6 +71,19 @@ Deno.test("群組完整流程 + LIFF API", async () => {
   await say(ADMIN, "/記 阿美 50 小明 -50");
   ok((await say(OTHER, "/最近")).includes("#2 阿美 +50｜小明 -50"));
 
+  // 刪人：只能刪沒有紀錄的
+  ok((await say(OTHER, "/刪人 老王")).includes("只有管理員"));
+  ok((await say(ADMIN, "/刪人")).includes("用法"));
+  await say(ADMIN, "/加人 打錯 臨時");
+  const del = await say(ADMIN, "/刪人 打錯 老王 不存在");
+  ok(del.includes("已刪除：打錯") && del.includes("「老王」已經有 1 場紀錄") && del.includes("不存在（找不到）"), del);
+  const tmpId = (await api(ADMIN, `room?code=${code}`)).body.players.find((p: any) => p.name === "臨時").id;
+  eq((await api(OTHER, "player/delete", { code, player_id: tmpId })).status, 403);
+  eq((await api(ADMIN, "player/delete", { code, player_id: tmpId })).status, 200);
+  const xiaoming = (await api(ADMIN, `room?code=${code}`)).body.players.find((p: any) => p.name === "小明").id;
+  eq((await api(ADMIN, "player/delete", { code, player_id: xiaoming })).status, 400);
+  eq((await api(ADMIN, "player/delete", { code, player_id: tmpId })).body.error, "找不到這位玩家");
+
   // LIFF API
   const room = await api(OTHER, `room?code=${code}`);
   eq(room.status, 200);

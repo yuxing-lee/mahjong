@@ -11,6 +11,7 @@
 //   POST api/expense      ← 管理員記一筆額外消費（例如飲料錢）
 //   POST api/expense/delete ← 管理員刪一筆額外消費
 //   POST api/player       ← 管理員加玩家
+//   POST api/player/delete ← 管理員刪玩家（只限還沒有對局紀錄的）
 //   POST api/claim        ← 玩家認領自己的名字
 //
 // 環境變數：
@@ -267,6 +268,7 @@ const HELP = [
   "",
   "/開房 房間名稱　把這個群組設成計分房（建房的人是管理員）",
   "/加人 小明 阿華 老王　加入玩家",
+  "/刪人 小明　刪除玩家（只限還沒打過的）",
   "/記 小明+100 阿華-30 老王-70　記一場（總和要是 0）",
   "/戰績　看排行榜",
   "/最近　看最近 5 場",
@@ -283,7 +285,7 @@ const HELP = [
   "/記分頁　開啟記分頁面",
   "",
   "＊輸入框上方的按鈕點了就會送出指令",
-  "＊加人、記分、撤銷、刪房、設管理員只有管理員能操作",
+  "＊加人、刪人、記分、撤銷、刪房、設管理員只有管理員能操作",
   "＊分數只作為遊戲紀錄，不具任何金錢價值",
 ].join("\n");
 
@@ -421,7 +423,7 @@ async function handleEvent(ev: any) {
       }
     }
 
-    if (["/加人", "/記", "/撤銷", "/刪房", "/設管理員", "/移除管理員", "/設台費", "/取消台費"].includes(cmd) && !isAdmin) {
+    if (["/加人", "/刪人", "/記", "/撤銷", "/刪房", "/設管理員", "/移除管理員", "/設台費", "/取消台費"].includes(cmd) && !isAdmin) {
       return void await r([text("只有管理員可以操作這個指令。")]);
     }
 
@@ -435,6 +437,28 @@ async function handleEvent(ev: any) {
           (added.length ? `✅ 已加入：${added.join("、")}` : "沒有新加入的玩家（名字已存在）") +
             `\n目前玩家：${all.join("、")}`,
         )]);
+      }
+
+      case "/刪人": {
+        const names = cleanNames(args.split(/[\s,，、]+/).map((n) => n.replace(/^@/, "")));
+        const players = await store.playersOf(room.id);
+        if (!names.length) {
+          return void await r([text(`用法：/刪人 小明（可以一次刪多位）\n只能刪還沒有對局紀錄的玩家。\n目前玩家：${players.map((p) => p.name).join("、") || "沒有"}`)]);
+        }
+        const done: string[] = [];
+        const skipped: string[] = [];
+        for (const n of names) {
+          const p = players.find((x) => x.name === n);
+          if (!p) { skipped.push(`${n}（找不到）`); continue; }
+          try { await store.deletePlayer(room.id, p.id); done.push(n); }
+          catch (e) { if (e instanceof UserError) skipped.push(e.message); else throw e; }
+        }
+        const left = (await store.playersOf(room.id)).map((p) => p.name);
+        return void await r([text([
+          done.length ? `🗑️ 已刪除：${done.join("、")}` : "",
+          skipped.length ? `略過：${skipped.join("\n")}` : "",
+          `目前玩家：${left.join("、") || "沒有"}`,
+        ].filter(Boolean).join("\n"))]);
       }
 
       case "/記": {
@@ -665,6 +689,12 @@ async function handleApi(req: Request, route: string) {
     if (!names.length) throw new HttpError(400, "名字不能空白，也不能有數字或 +、-");
     const added = await store.insertPlayers(room.id, names);
     if (!added.length) throw new HttpError(400, "這個名字已經存在");
+    return json({ ok: true });
+  }
+
+  if (route === "player/delete" && req.method === "POST") {
+    requireAdmin();
+    await store.deletePlayer(room.id, String(body.player_id ?? ""));
     return json({ ok: true });
   }
 

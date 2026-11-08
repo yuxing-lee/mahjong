@@ -30,6 +30,8 @@ export interface Store {
   insertPlayers(roomId: string, names: string[]): Promise<string[]>;
   claimPlayer(roomId: string, playerId: string, lineUserId: string): Promise<void>;
   setHouse(roomId: string, playerId: string, isHouse: boolean): Promise<void>;
+  /** 刪除還沒有任何對局紀錄的玩家；找不到或已有紀錄時丟出 UserError（有紀錄的刪掉會讓那幾場總和不為 0） */
+  deletePlayer(roomId: string, playerId: string): Promise<void>;
 
   /** games 由舊到新 */
   gamesOf(roomId: string): Promise<{ games: Game[]; scores: Score[] }>;
